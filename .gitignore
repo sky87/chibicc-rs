@@ -1,0 +1,9 @@
+/target
+
+**/*~
+**/\#*
+**/*.o
+**/*.s
+**/a.out
+/tmp*
+/chibicc
