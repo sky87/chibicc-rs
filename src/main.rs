@@ -1,57 +1,113 @@
 use std::env;
 
+#[derive(Debug)]
+enum TokenKind {
+    Punct,
+    Num { val: i32 },
+    Eof
+}
+
+#[derive(Debug)]
+struct Token {
+    offset: usize,
+    length: usize,
+    kind: TokenKind
+}
+
+fn equal(tk: &Token, s: &str, src: &str) -> bool {
+    src[tk.offset..(tk.offset + tk.length)].eq(s)
+}
+
+fn get_number(tk: &Token) -> i32 {
+    match tk.kind {
+        TokenKind::Num { val } => val,
+        _ => panic!("expected a number, found {:?}", tk)
+    }
+}
+
+fn tokenize(src: &str) -> Vec<Token> {
+    let mut tks = Vec::new();
+    let mut offset = 0;
+    // TODO: figure out a way to sanely work with unicode cps
+    // while keeping track of byte offsets...
+    let buf = src.as_bytes();
+
+    while offset < buf.len() {
+        let c = buf[offset];
+
+        if c.is_ascii_whitespace() {
+            offset += 1;
+        }
+        else if c.is_ascii_digit() {
+            let (val, count) = read_int(buf, offset);
+            if count == 0 {
+                panic!("Failed to read integer at: {}...", String::from_utf8_lossy(&buf[offset..(offset + 10)]))
+            }
+            tks.push(Token {
+                offset,
+                length: count,
+                kind: TokenKind::Num { val },
+            });
+            offset += count;
+        }
+        else if c == b'+' || c == b'-' {
+            tks.push(Token {
+                offset,
+                length: 1,
+                kind: TokenKind::Punct,
+            });
+            offset += 1;
+        }
+    }
+
+    tks.push(Token { offset, length: 0, kind: TokenKind::Eof });
+    tks
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
         panic!("{}: invalid number of arguments", args[0]);
     }
 
-    let mut buf: &str = &args[1];
-    let mut n: i32;
+    let src = &args[1];
+    let tks = tokenize(src);
+    let mut tki = tks.iter();
 
     println!("  .globl main");
     println!("main:");
-    (n, buf) = read_int(buf);
-    println!("  mov ${}, %rax", n);
+    println!("  mov ${}, %rax", get_number(tki.next().unwrap()));
 
-    while buf.len() > 0 {
-        let c = buf.as_bytes()[0];
-        if c == b'+' {
-            (n, buf) = read_int(&buf[1..]);
-            println!("  add ${}, %rax", n);
+    while let Some(tk) = tki.next() {
+        if equal(tk, "+", src) {
+            println!("  add ${}, %rax", get_number(tki.next().unwrap()));
         }
-        else if c == b'-' {
-            (n, buf) = read_int(&buf[1..]);
-            println!("  sub ${}, %rax", n);
+        else if equal(tk, "-", src) {
+            println!("  sub ${}, %rax", get_number(tki.next().unwrap()));
         }
         else {
-            panic!("unexpected character: '{}'", c as char);
+            match tk.kind {
+                TokenKind::Eof => break,
+                _ => panic!("unexpected token {:?}", tk)
+            };
         }
     }
 
     println!("  ret");
 }
 
-// chibicc uses strtol instead of something home-cooked
-fn read_int(buf: &str) -> (i32, &str) {
-    let mut acc = 0;
-    let mut sign = 1;
-    for (i, c) in buf.chars().enumerate() {
-        if c == '-' && i == 0 {
-            sign = -1;
-        }
-        else if c == '+' && i == 0 {
-            // do nothing, this is the default
-        }
-        else if c.is_numeric() {
-            acc = acc * 10 + c.to_digit(10).unwrap();
+fn read_int(buf: &[u8], start_offset: usize) -> (i32, usize) {
+    let mut acc: i32 = 0;
+    let mut offset = start_offset;
+    while offset < buf.len() {
+        let b = buf[offset];
+        if b.is_ascii_digit() {
+            offset += 1;
+            acc = acc * 10 + i32::from(b - b'0');
         }
         else {
-            if i == 0 {
-                panic!("read_int failed on input: {}", buf);
-            }
-            return (sign*TryInto::<i32>::try_into(acc).unwrap(), &buf[i..]);
+            break;
         }
     }
-    return (sign*TryInto::<i32>::try_into(acc).unwrap(), &buf[buf.len()..]);
+    return (acc, offset - start_offset);
 }
