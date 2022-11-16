@@ -5,7 +5,7 @@ assert() {
 
   ./target/debug/chibicc-rs "$input" > tmp.s || exit
   gcc -static -o tmp tmp.s
-  RUST_BACKTRACE=1 ./tmp
+  ./tmp
   actual="$?"
 
   if [ "$actual" = "$expected" ]; then
@@ -16,7 +16,9 @@ assert() {
   fi
 }
 
-cargo build
+cargo build || exit
+
+export RUST_BACKTRACE=1
 
 assert 0 0
 assert 42 42
