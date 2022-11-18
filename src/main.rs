@@ -22,7 +22,8 @@ pub enum NodeKind {
     Add { lhs: P<Node>, rhs: P<Node> },
     Sub { lhs: P<Node>, rhs: P<Node> },
     Mul { lhs: P<Node>, rhs: P<Node> },
-    Div { lhs: P<Node>, rhs: P<Node> }
+    Div { lhs: P<Node>, rhs: P<Node> },
+    Neg { exp: P<Node> }
 }
 
 pub struct Node {
@@ -142,6 +143,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // expr = mul ("+" mul | "-" mul)*
     fn expr(&mut self) -> Node {
         let mut node = self.mul();
         
@@ -177,8 +179,9 @@ impl<'a> Parser<'a> {
         node
     }
 
+    // mul = unary ("*" unary | "/" unary)*
     fn mul(&mut self) -> Node {
-        let mut node = self.primary();
+        let mut node = self.unary();
         
         loop {
             match self.peek().kind {
@@ -188,7 +191,7 @@ impl<'a> Parser<'a> {
                         node = Node {
                             kind: NodeKind::Mul { 
                                 lhs: P::new(node), 
-                                rhs: P::new(self.mul()) 
+                                rhs: P::new(self.unary()) 
                             }
                         }
                     }
@@ -197,7 +200,7 @@ impl<'a> Parser<'a> {
                         node = Node {
                             kind: NodeKind::Div { 
                                 lhs: P::new(node), 
-                                rhs: P::new(self.mul()) 
+                                rhs: P::new(self.unary()) 
                             }
                         }
                     }
@@ -212,6 +215,23 @@ impl<'a> Parser<'a> {
         node
     }
 
+    // unary = ("+" | "-") unary
+    //       | primary
+    fn unary(&mut self) -> Node {
+        if self.tok_is("+") {
+            self.advance();
+            return self.unary()
+        }
+        
+        if self.tok_is("-") {
+            self.advance();
+            return Node { kind: NodeKind::Neg { exp: P::new(self.unary()) }}
+        }
+
+        self.primary()
+    }
+
+    // primary = "(" expr ")" | num
     fn primary(&mut self) -> Node {
         match self.peek().kind {
             TokenKind::Num { val } => {
@@ -295,6 +315,10 @@ impl<'a> Codegen<'a> {
     fn expr(&mut self, node: &Node) {
         match node.kind {
             NodeKind::Num { val } => println!("  mov ${}, %rax", val),
+            NodeKind::Neg { exp: ref expr } => {
+                self.expr(expr);
+                println!("  neg %rax");
+            }
             NodeKind::Add { ref lhs, ref rhs } => {
                 self.expr(rhs.as_ref());
                 self.push();
@@ -323,7 +347,7 @@ impl<'a> Codegen<'a> {
                 self.pop("%rdi");
                 println!("  cqo");
                 println!("  idiv %rdi, %rax");
-            },
+            }
         };
     }
 }
