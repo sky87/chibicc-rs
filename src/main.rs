@@ -23,7 +23,12 @@ pub enum NodeKind {
     Sub { lhs: P<Node>, rhs: P<Node> },
     Mul { lhs: P<Node>, rhs: P<Node> },
     Div { lhs: P<Node>, rhs: P<Node> },
-    Neg { exp: P<Node> }
+    Neg { exp: P<Node> },
+
+    Eq { lhs: P<Node>, rhs: P<Node> },
+    Ne { lhs: P<Node>, rhs: P<Node> },
+    Lt { lhs: P<Node>, rhs: P<Node> },
+    Le { lhs: P<Node>, rhs: P<Node> },
 }
 
 pub struct Node {
@@ -63,16 +68,16 @@ impl<'a> Lexer<'a> {
     fn tokenize(&self) -> Vec<Token> {
         let mut toks = Vec::new();
         let mut offset = 0;
-        let buf = &self.src;
+        let src = self.src;
     
-        while offset < buf.len() {
-            let c = buf[offset];
+        while offset < src.len() {
+            let c = src[offset];
     
             if c.is_ascii_whitespace() {
                 offset += 1;
             }
             else if c.is_ascii_digit() {
-                let (val, count) = read_int(buf, offset);
+                let (val, count) = read_int(&src[offset..]);
                 if count == 0 {
                     self.error_at(offset, "expected number")
                 }
@@ -83,16 +88,19 @@ impl<'a> Lexer<'a> {
                 });
                 offset += count;
             }
-            else if ispunct(c) {
-                toks.push(Token {
-                    offset,
-                    length: 1,
-                    kind: TokenKind::Punct,
-                });
-                offset += 1;
-            }
             else {
-                self.error_at(offset, "invalid token")
+                let punct_len = read_punct(&src[offset..]);
+                if punct_len > 0 {
+                    toks.push(Token {
+                        offset,
+                        length: punct_len,
+                        kind: TokenKind::Punct,
+                    });
+                    offset += punct_len;
+                }
+                else {
+                    self.error_at(offset, "invalid token");
+                }
             }
         }
     
@@ -101,9 +109,9 @@ impl<'a> Lexer<'a> {
     }
 }
 
-fn read_int(buf: &[u8], start_offset: usize) -> (i32, usize) {
+fn read_int(buf: &[u8]) -> (i32, usize) {
     let mut acc: i32 = 0;
-    let mut offset = start_offset;
+    let mut offset = 0;
     while offset < buf.len() {
         let b = buf[offset];
         if b.is_ascii_digit() {
@@ -114,11 +122,29 @@ fn read_int(buf: &[u8], start_offset: usize) -> (i32, usize) {
             break;
         }
     }
-    return (acc, offset - start_offset);
+    return (acc, offset);
 }
 
 fn ispunct(c: u8) -> bool {
-    return c == b'+' || c == b'-' || c == b'*' || c == b'/' || c == b'(' || c == b')';
+    return c == b'+' || c == b'-' || c == b'*' || c == b'/' || 
+        c == b'(' || c == b')' || c == b'<' || c == b'>';
+}
+
+fn starts_with(src: &[u8], s: &str) -> bool {
+    return src.starts_with(s.as_bytes());
+}
+
+fn read_punct(src: &[u8]) -> usize {
+    if starts_with(src, "==") || starts_with(src, "!=")
+       || starts_with(src, "<=") || starts_with(src, ">=") {
+        2
+    }
+    else if ispunct(src[0]) {
+        1
+    }
+    else {
+        0
+    }
 }
 
 pub struct Parser<'a> {
@@ -142,37 +168,117 @@ impl<'a> Parser<'a> {
             tok_index: 0,
         }
     }
-
-    // expr = mul ("+" mul | "-" mul)*
+    
+    // expr = equality
     fn expr(&mut self) -> Node {
+        self.equality()
+    }
+
+    // equality = relational ("==" relational | "!=" relational)*
+    fn equality(&mut self) -> Node {
+        let mut node = self.relational();
+        
+        loop {
+            if self.tok_is("==") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Eq { 
+                        lhs: P::new(node), 
+                        rhs: P::new(self.relational()) 
+                    }
+                };
+            }
+            else if self.tok_is("!=") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Ne { 
+                        lhs: P::new(node), 
+                        rhs: P::new(self.relational()) 
+                    }
+                };
+            }
+            else {
+                break;
+            }
+        }
+
+        node
+    }
+
+    // relational = add ("<" add | "<=" add | ">" add | ">=" add)*
+    fn relational(&mut self) -> Node {
+        let mut node = self.add();
+        
+        loop {
+            if self.tok_is("<") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Lt { 
+                        lhs: P::new(node), 
+                        rhs: P::new(self.add()) 
+                    }
+                };
+            }
+            else if self.tok_is("<=") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Le { 
+                        lhs: P::new(node), 
+                        rhs: P::new(self.add()) 
+                    }
+                };
+            }
+            else if self.tok_is(">") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Lt { 
+                        lhs: P::new(self.add()),
+                        rhs: P::new(node)
+                    }
+                };
+            }
+            else if self.tok_is(">=") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Le { 
+                        lhs: P::new(self.add()),
+                        rhs: P::new(node)
+                    }
+                };
+            }
+            else {
+                break;
+            }
+        }
+
+        node
+    }
+
+    // add = mul ("+" mul | "-" mul)*
+    fn add(&mut self) -> Node {
         let mut node = self.mul();
         
         loop {
-            match self.peek().kind {
-                TokenKind::Punct => {
-                    if self.tok_is("+") {
-                        self.advance();
-                        node = Node {
-                            kind: NodeKind::Add { 
-                                lhs: P::new(node), 
-                                rhs: P::new(self.mul()) 
-                            }
-                        }
+            if self.tok_is("+") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Add { 
+                        lhs: P::new(node), 
+                        rhs: P::new(self.mul()) 
                     }
-                    else if self.tok_is("-") {
-                        self.advance();
-                        node = Node {
-                            kind: NodeKind::Sub { 
-                                lhs: P::new(node), 
-                                rhs: P::new(self.mul()) 
-                            }
-                        }
+                };
+            }
+            else if self.tok_is("-") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Sub { 
+                        lhs: P::new(node), 
+                        rhs: P::new(self.mul()) 
                     }
-                    else {
-                        break;
-                    }
-                },
-                _ => break
+                };
+            }
+            else {
+                break;
             }
         }
 
@@ -184,31 +290,26 @@ impl<'a> Parser<'a> {
         let mut node = self.unary();
         
         loop {
-            match self.peek().kind {
-                TokenKind::Punct => {
-                    if self.tok_is("*") {
-                        self.advance();
-                        node = Node {
-                            kind: NodeKind::Mul { 
-                                lhs: P::new(node), 
-                                rhs: P::new(self.unary()) 
-                            }
-                        }
+            if self.tok_is("*") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Mul { 
+                        lhs: P::new(node), 
+                        rhs: P::new(self.unary()) 
                     }
-                    else if self.tok_is("/") {
-                        self.advance();
-                        node = Node {
-                            kind: NodeKind::Div { 
-                                lhs: P::new(node), 
-                                rhs: P::new(self.unary()) 
-                            }
-                        }
+                };
+            }
+            else if self.tok_is("/") {
+                self.advance();
+                node = Node {
+                    kind: NodeKind::Div { 
+                        lhs: P::new(node), 
+                        rhs: P::new(self.unary()) 
                     }
-                    else {
-                        break;
-                    }
-                },
-                _ => break
+                };
+            }
+            else {
+                break;
             }
         }
 
@@ -247,7 +348,7 @@ impl<'a> Parser<'a> {
                 },
             _ => {}
         };
-        self.error_tok(self.peek(), "expected an expression")
+        self.error_tok(self.peek(), "expected an expression");
     }
 
     fn peek(&self) -> &Token { &self.toks[self.tok_index] }
@@ -347,7 +448,43 @@ impl<'a> Codegen<'a> {
                 self.pop("%rdi");
                 println!("  cqo");
                 println!("  idiv %rdi, %rax");
-            }
+            },
+            NodeKind::Eq { ref lhs, ref rhs } => {
+                self.expr(rhs.as_ref());
+                self.push();
+                self.expr(lhs.as_ref());
+                self.pop("%rdi");
+                println!("  cmp %rdi, %rax");
+                println!("  sete %al");
+                println!("  movzb %al, %rax");
+            },
+            NodeKind::Ne { ref lhs, ref rhs } => {
+                self.expr(rhs.as_ref());
+                self.push();
+                self.expr(lhs.as_ref());
+                self.pop("%rdi");
+                println!("  cmp %rdi, %rax");
+                println!("  setne %al");
+                println!("  movzb %al, %rax");
+            },
+            NodeKind::Le { ref lhs, ref rhs } => {
+                self.expr(rhs.as_ref());
+                self.push();
+                self.expr(lhs.as_ref());
+                self.pop("%rdi");
+                println!("  cmp %rdi, %rax");
+                println!("  setle %al");
+                println!("  movzb %al, %rax");
+            },
+            NodeKind::Lt { ref lhs, ref rhs } => {
+                self.expr(rhs.as_ref());
+                self.push();
+                self.expr(lhs.as_ref());
+                self.pop("%rdi");
+                println!("  cmp %rdi, %rax");
+                println!("  setl %al");
+                println!("  movzb %al, %rax");
+            },
         };
     }
 }
