@@ -21,6 +21,13 @@ impl<'a> Codegen<'a> {
     pub fn program(&mut self, node: &TopLevelNode) {
         println!("  .globl main");
         println!("main:");
+
+        // Prologue
+        println!("  push %rbp");
+        println!("  mov %rsp, %rbp");
+        println!("  sub $208, %rsp");
+        println!();
+
         match node.kind {
             TopLevelKind::Stmts(ref stmts) => {
                 for stmt in stmts {
@@ -28,6 +35,10 @@ impl<'a> Codegen<'a> {
                 }
             }
         }
+
+        println!();
+        println!("  mov %rbp, %rsp");
+        println!("  pop %rbp");
         println!("  ret");
     }
 
@@ -53,6 +64,17 @@ impl<'a> Codegen<'a> {
             ExprKind::Neg(ref expr) => {
                 self.expr(expr);
                 println!("  neg %rax");
+            }
+            ExprKind::Var(_) => {
+                self.addr(node);
+                println!("  mov (%rax), %rax");
+            }
+            ExprKind::Assign(ref lhs, ref rhs) => {
+                self.addr(lhs);
+                self.push();
+                self.expr(rhs);
+                self.pop("%rdi");
+                println!("  mov %rax, (%rdi)");
             }
             ExprKind::Add(ref lhs, ref rhs) => {
                 self.expr(rhs.as_ref());
@@ -120,6 +142,16 @@ impl<'a> Codegen<'a> {
                 println!("  movzb %al, %rax");
             }
         };
+    }
+
+    fn addr(&self, expr: &ExprNode) {
+        if let ExprKind::Var(name) = expr.kind {
+            let index: i64 = (name - b'a' + 1).into();
+            println!("  lea {}(%rbp), %rax", -index * 8);
+            return;
+        }
+        
+        panic!("not an lvalue: {:?}", expr);
     }
 
     pub fn sanity_checks(&self) {

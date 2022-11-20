@@ -3,7 +3,8 @@ use crate::errors::ErrorReporting;
 #[derive(Debug)]
 pub enum TokenKind {
     Punct,
-    Num { val: i32 },
+    Ident,
+    Num(i32),
     Eof
 }
 
@@ -46,9 +47,17 @@ impl<'a> Lexer<'a> {
               toks.push(Token {
                   offset,
                   length: count,
-                  kind: TokenKind::Num { val },
+                  kind: TokenKind::Num(val),
               });
               offset += count;
+          }
+          else if c.is_ascii_alphabetic() {
+            toks.push(Token {
+                offset,
+                length: 1,
+                kind: TokenKind::Ident,
+            });
+            offset += 1;
           }
           else {
               let punct_len = read_punct(&src[offset..]);
@@ -88,7 +97,7 @@ fn read_int(buf: &[u8]) -> (i32, usize) {
 }
 
 fn ispunct(c: u8) -> bool {
-  return c == b';' || c == b'+' || c == b'-' || c == b'*' || c == b'/' || 
+  return c == b';' || c == b'=' || c == b'+' || c == b'-' || c == b'*' || c == b'/' || 
       c == b'(' || c == b')' || c == b'<' || c == b'>';
 }
 

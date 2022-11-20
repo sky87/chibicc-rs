@@ -11,6 +11,7 @@ pub struct Node<Kind> {
 #[derive(Debug)]
 pub enum ExprKind {
     Num(i32),
+    Var(u8),
 
     Add(P<ExprNode>, P<ExprNode>),
     Sub(P<ExprNode>, P<ExprNode>),
@@ -22,6 +23,8 @@ pub enum ExprKind {
     Ne(P<ExprNode>, P<ExprNode>),
     Lt(P<ExprNode>, P<ExprNode>),
     Le(P<ExprNode>, P<ExprNode>),
+
+    Assign(P<ExprNode>, P<ExprNode>),
 }
 
 #[derive(Debug)]
@@ -81,9 +84,21 @@ impl<'a> Parser<'a> {
         StmtNode { kind: StmtKind::Expr(expr) }
     }
 
-    // expr = equality
+    // expr = assign
     fn expr(&mut self) -> ExprNode {
-        self.equality()
+        self.assign()
+    }
+
+    // assign = equality ("=" assign)?
+    fn assign(&mut self) -> ExprNode {
+        let mut node = self.equality();
+        if self.tok_is("=") {
+            self.advance();
+            node = ExprNode {
+                kind: ExprKind::Assign(P::new(node), P::new(self.assign()))
+            };
+        }
+        node
     }
 
     // equality = relational ("==" relational | "!=" relational)*
@@ -214,12 +229,17 @@ impl<'a> Parser<'a> {
         self.primary()
     }
 
-    // primary = "(" expr ")" | num
+    // primary = "(" expr ")" | ident | num
     fn primary(&mut self) -> ExprNode {
         match self.peek().kind {
-            TokenKind::Num { val } => {
+            TokenKind::Num(val) => {
                 self.advance();
                 return ExprNode { kind: ExprKind::Num(val) }
+            }
+            TokenKind::Ident => {
+                let node = ExprNode { kind: ExprKind::Var(self.src[self.peek().offset]) };
+                self.advance();
+                return node;
             }
             TokenKind::Punct => 
                 if self.tok_is("(") {
