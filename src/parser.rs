@@ -3,24 +3,40 @@ use crate::errors::ErrorReporting;
 
 pub type P<A> = Box<A>;
 
-pub enum NodeKind {
-    Num { val: i32 },
-
-    Add { lhs: P<Node>, rhs: P<Node> },
-    Sub { lhs: P<Node>, rhs: P<Node> },
-    Mul { lhs: P<Node>, rhs: P<Node> },
-    Div { lhs: P<Node>, rhs: P<Node> },
-    Neg { expr: P<Node> },
-
-    Eq { lhs: P<Node>, rhs: P<Node> },
-    Ne { lhs: P<Node>, rhs: P<Node> },
-    Lt { lhs: P<Node>, rhs: P<Node> },
-    Le { lhs: P<Node>, rhs: P<Node> },
+#[derive(Debug)]
+pub struct Node<Kind> {
+    pub kind: Kind,
 }
 
-pub struct Node {
-    pub kind: NodeKind
+#[derive(Debug)]
+pub enum ExprKind {
+    Num(i32),
+
+    Add(P<ExprNode>, P<ExprNode>),
+    Sub(P<ExprNode>, P<ExprNode>),
+    Mul(P<ExprNode>, P<ExprNode>),
+    Div(P<ExprNode>, P<ExprNode>),
+    Neg(P<ExprNode>),
+
+    Eq(P<ExprNode>, P<ExprNode>),
+    Ne(P<ExprNode>, P<ExprNode>),
+    Lt(P<ExprNode>, P<ExprNode>),
+    Le(P<ExprNode>, P<ExprNode>),
 }
+
+#[derive(Debug)]
+pub enum StmtKind {
+    Expr(ExprNode)
+}
+
+#[derive(Debug)]
+pub enum TopLevelKind {
+    Stmts(Vec<StmtNode>)
+}
+
+pub type ExprNode = Node<ExprKind>;
+pub type StmtNode = Node<StmtKind>;
+pub type TopLevelNode = Node<TopLevelKind>;
 
 pub struct Parser<'a> {
     src: &'a [u8],
@@ -44,32 +60,47 @@ impl<'a> Parser<'a> {
         }
     }
     
+    // stmts = stmt+
+    pub fn stmts(&mut self) -> TopLevelNode {
+        let mut stmts = Vec::new();
+        while !self.is_done() {
+            stmts.push(self.stmt())
+        }
+        TopLevelNode { kind: TopLevelKind::Stmts(stmts) }
+    }
+
+    // stmt = expr-stmt
+    fn stmt(&mut self) -> StmtNode {
+        self.expr_stmt()
+    }
+    
+    // expr-stmt = expr ";"
+    fn expr_stmt(&mut self) -> StmtNode {
+        let expr = self.expr();
+        self.skip(";");
+        StmtNode { kind: StmtKind::Expr(expr) }
+    }
+
     // expr = equality
-    pub fn expr(&mut self) -> Node {
+    fn expr(&mut self) -> ExprNode {
         self.equality()
     }
 
     // equality = relational ("==" relational | "!=" relational)*
-    fn equality(&mut self) -> Node {
+    fn equality(&mut self) -> ExprNode {
         let mut node = self.relational();
         
         loop {
             if self.tok_is("==") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Eq { 
-                        lhs: P::new(node), 
-                        rhs: P::new(self.relational()) 
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Eq(P::new(node), P::new(self.relational()))
                 };
             }
             else if self.tok_is("!=") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Ne { 
-                        lhs: P::new(node), 
-                        rhs: P::new(self.relational()) 
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Ne(P::new(node), P::new(self.relational()))
                 };
             }
             else {
@@ -81,44 +112,32 @@ impl<'a> Parser<'a> {
     }
 
     // relational = add ("<" add | "<=" add | ">" add | ">=" add)*
-    fn relational(&mut self) -> Node {
+    fn relational(&mut self) -> ExprNode {
         let mut node = self.add();
         
         loop {
             if self.tok_is("<") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Lt { 
-                        lhs: P::new(node), 
-                        rhs: P::new(self.add()) 
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Lt(P::new(node), P::new(self.add()))
                 };
             }
             else if self.tok_is("<=") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Le { 
-                        lhs: P::new(node), 
-                        rhs: P::new(self.add()) 
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Le(P::new(node), P::new(self.add()) )
                 };
             }
             else if self.tok_is(">") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Lt { 
-                        lhs: P::new(self.add()),
-                        rhs: P::new(node)
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Lt(P::new(self.add()), P::new(node))
                 };
             }
             else if self.tok_is(">=") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Le { 
-                        lhs: P::new(self.add()),
-                        rhs: P::new(node)
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Le(P::new(self.add()), P::new(node))
                 };
             }
             else {
@@ -130,26 +149,20 @@ impl<'a> Parser<'a> {
     }
 
     // add = mul ("+" mul | "-" mul)*
-    fn add(&mut self) -> Node {
+    fn add(&mut self) -> ExprNode {
         let mut node = self.mul();
         
         loop {
             if self.tok_is("+") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Add { 
-                        lhs: P::new(node), 
-                        rhs: P::new(self.mul()) 
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Add(P::new(node), P::new(self.mul()))
                 };
             }
             else if self.tok_is("-") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Sub { 
-                        lhs: P::new(node), 
-                        rhs: P::new(self.mul()) 
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Sub(P::new(node), P::new(self.mul()))
                 };
             }
             else {
@@ -161,26 +174,20 @@ impl<'a> Parser<'a> {
     }
 
     // mul = unary ("*" unary | "/" unary)*
-    fn mul(&mut self) -> Node {
+    fn mul(&mut self) -> ExprNode {
         let mut node = self.unary();
         
         loop {
             if self.tok_is("*") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Mul { 
-                        lhs: P::new(node), 
-                        rhs: P::new(self.unary()) 
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Mul(P::new(node), P::new(self.unary()))
                 };
             }
             else if self.tok_is("/") {
                 self.advance();
-                node = Node {
-                    kind: NodeKind::Div { 
-                        lhs: P::new(node), 
-                        rhs: P::new(self.unary()) 
-                    }
+                node = ExprNode {
+                    kind: ExprKind::Div(P::new(node), P::new(self.unary()))
                 };
             }
             else {
@@ -193,7 +200,7 @@ impl<'a> Parser<'a> {
 
     // unary = ("+" | "-") unary
     //       | primary
-    fn unary(&mut self) -> Node {
+    fn unary(&mut self) -> ExprNode {
         if self.tok_is("+") {
             self.advance();
             return self.unary()
@@ -201,18 +208,18 @@ impl<'a> Parser<'a> {
         
         if self.tok_is("-") {
             self.advance();
-            return Node { kind: NodeKind::Neg { expr: P::new(self.unary()) }}
+            return ExprNode { kind: ExprKind::Neg(P::new(self.unary())) }
         }
 
         self.primary()
     }
 
     // primary = "(" expr ")" | num
-    fn primary(&mut self) -> Node {
+    fn primary(&mut self) -> ExprNode {
         match self.peek().kind {
             TokenKind::Num { val } => {
                 self.advance();
-                return Node { kind: NodeKind::Num { val } }
+                return ExprNode { kind: ExprKind::Num(val) }
             }
             TokenKind::Punct => 
                 if self.tok_is("(") {
@@ -246,10 +253,16 @@ impl<'a> Parser<'a> {
         self.advance();
     }
 
-    pub fn ensure_done(&self) {
+    fn is_done(&self) -> bool {
         match self.peek().kind {
-            TokenKind::Eof => {},
-            _ => self.error_tok(self.peek(), "extra token")
+            TokenKind::Eof => true,
+            _ => false
+        }
+    }
+
+    pub fn ensure_done(&self) {
+        if !self.is_done() {
+            self.error_tok(self.peek(), "extra token")
         }
     }
 }

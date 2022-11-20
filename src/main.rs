@@ -21,7 +21,7 @@ fn main() {
 
     let mut parser = Parser::new(src, &toks);
 
-    let node = parser.expr();
+    let node = parser.stmts();
     parser.ensure_done();
 
     let mut codegen = Codegen::new(src);

@@ -88,7 +88,7 @@ fn read_int(buf: &[u8]) -> (i32, usize) {
 }
 
 fn ispunct(c: u8) -> bool {
-  return c == b'+' || c == b'-' || c == b'*' || c == b'/' || 
+  return c == b';' || c == b'+' || c == b'-' || c == b'*' || c == b'/' || 
       c == b'(' || c == b')' || c == b'<' || c == b'>';
 }
 
