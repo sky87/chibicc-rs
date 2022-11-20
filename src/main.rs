@@ -21,10 +21,10 @@ fn main() {
 
     let mut parser = Parser::new(src, &toks);
 
-    let node = parser.stmts();
+    let node = parser.function();
     parser.ensure_done();
 
-    let mut codegen = Codegen::new(src);
-    codegen.program(&node);
+    let mut codegen = Codegen::new(src, &node);
+    codegen.program();
     codegen.sanity_checks();
 }

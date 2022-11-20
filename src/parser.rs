@@ -1,7 +1,10 @@
+use std::collections::HashSet;
+
 use crate::lexer::{Token, TokenKind};
 use crate::errors::ErrorReporting;
 
 pub type P<A> = Box<A>;
+pub type AsciiStr = Vec<u8>;
 
 #[derive(Debug)]
 pub struct Node<Kind> {
@@ -11,7 +14,7 @@ pub struct Node<Kind> {
 #[derive(Debug)]
 pub enum ExprKind {
     Num(i32),
-    Var(u8),
+    Var(AsciiStr),
 
     Add(P<ExprNode>, P<ExprNode>),
     Sub(P<ExprNode>, P<ExprNode>),
@@ -34,7 +37,7 @@ pub enum StmtKind {
 
 #[derive(Debug)]
 pub enum TopLevelKind {
-    Stmts(Vec<StmtNode>)
+    Function(Vec<AsciiStr>, Vec<StmtNode>)
 }
 
 pub type ExprNode = Node<ExprKind>;
@@ -44,7 +47,8 @@ pub type TopLevelNode = Node<TopLevelKind>;
 pub struct Parser<'a> {
     src: &'a [u8],
     toks: &'a [Token],
-    tok_index: usize
+    tok_index: usize,
+    vars: HashSet<AsciiStr>,
 }
 
 impl<'a> ErrorReporting for Parser<'a> {
@@ -60,16 +64,17 @@ impl<'a> Parser<'a> {
             src,
             toks,
             tok_index: 0,
+            vars: HashSet::new()
         }
     }
-    
+
     // stmts = stmt+
-    pub fn stmts(&mut self) -> TopLevelNode {
+    pub fn function(&mut self) -> TopLevelNode {
         let mut stmts = Vec::new();
         while !self.is_done() {
             stmts.push(self.stmt())
         }
-        TopLevelNode { kind: TopLevelKind::Stmts(stmts) }
+        TopLevelNode { kind: TopLevelKind::Function(self.vars.clone().into_iter().collect(), stmts) }
     }
 
     // stmt = expr-stmt
@@ -237,7 +242,9 @@ impl<'a> Parser<'a> {
                 return ExprNode { kind: ExprKind::Num(val) }
             }
             TokenKind::Ident => {
-                let node = ExprNode { kind: ExprKind::Var(self.src[self.peek().offset]) };
+                let name = self.tok_source(self.peek()).to_owned();
+                let node = ExprNode { kind: ExprKind::Var(name.clone()) };
+                self.vars.insert(name);
                 self.advance();
                 return node;
             }
@@ -261,9 +268,12 @@ impl<'a> Parser<'a> {
         self.tok_index += 1;
     }
 
+    fn tok_source(&self, tok: &Token) -> &[u8] {
+        &self.src[tok.offset..(tok.offset + tok.length)]
+    }
+
     fn tok_is(&self, s: &str) -> bool {
-        let tok = self.peek();
-        self.src[tok.offset..(tok.offset + tok.length)].eq(s.as_bytes())
+        self.tok_source(self.peek()).eq(s.as_bytes())
     }
 
     fn skip(&mut self, s: &str) {

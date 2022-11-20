@@ -51,13 +51,17 @@ impl<'a> Lexer<'a> {
               });
               offset += count;
           }
-          else if c.is_ascii_alphabetic() {
+          else if is_ident_start(c) {
+            let start_offset = offset;
+            loop {
+                offset += 1;
+                if !is_ident_cont(src[offset]) { break; }
+            }
             toks.push(Token {
-                offset,
-                length: 1,
+                offset: start_offset,
+                length: offset - start_offset,
                 kind: TokenKind::Ident,
             });
-            offset += 1;
           }
           else {
               let punct_len = read_punct(&src[offset..]);
@@ -99,6 +103,13 @@ fn read_int(buf: &[u8]) -> (i32, usize) {
 fn ispunct(c: u8) -> bool {
   return c == b';' || c == b'=' || c == b'+' || c == b'-' || c == b'*' || c == b'/' || 
       c == b'(' || c == b')' || c == b'<' || c == b'>';
+}
+
+fn is_ident_start(c: u8) -> bool {
+    c.is_ascii_alphabetic() || c == b'_'
+}
+fn is_ident_cont(c: u8) -> bool {
+    is_ident_start(c) || c.is_ascii_digit()
 }
 
 fn starts_with(src: &[u8], s: &str) -> bool {

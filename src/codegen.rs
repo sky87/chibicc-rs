@@ -1,9 +1,38 @@
+use std::collections::HashMap;
+
 use crate::errors::ErrorReporting;
-use crate::parser::{TopLevelNode, TopLevelKind, StmtNode, StmtKind, ExprNode, ExprKind};
+use crate::parser::{TopLevelNode, TopLevelKind, StmtNode, StmtKind, ExprNode, ExprKind, AsciiStr};
+
+
+struct GenFunction {
+    offsets: HashMap<AsciiStr, i64>,
+    stack_size: usize
+}
+
+impl GenFunction {
+    fn new(node: &TopLevelNode) -> Self {
+        match node.kind {
+            TopLevelKind::Function(ref locals, _) => {
+                let mut offset = 0;
+                let mut offsets = HashMap::new();
+                for local in locals {
+                    offset -= 8;
+                    offsets.insert(local.to_owned(), offset);
+                }
+                Self {
+                    offsets,
+                    stack_size: align_to(-offset, 16),
+                }
+            }
+        }
+    }
+}
 
 pub struct Codegen<'a> {
     src: &'a [u8],
     depth: i64,
+    top_node: &'a TopLevelNode,
+    curr_gen_fn: GenFunction
 }
 
 impl<'a> ErrorReporting for Codegen<'a> {
@@ -11,26 +40,28 @@ impl<'a> ErrorReporting for Codegen<'a> {
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(src: &'a [u8]) -> Self {
+    pub fn new(src: &'a [u8], node: &'a TopLevelNode) -> Self {
         Self {
             src,
-            depth: 0
+            depth: 0,
+            top_node: node,
+            curr_gen_fn: GenFunction::new(node)
         }
     }
 
-    pub fn program(&mut self, node: &TopLevelNode) {
+    pub fn program(&mut self) {
         println!("  .globl main");
         println!("main:");
 
         // Prologue
         println!("  push %rbp");
         println!("  mov %rsp, %rbp");
-        println!("  sub $208, %rsp");
+        println!("  sub ${}, %rsp", self.curr_gen_fn.stack_size);
         println!();
 
-        match node.kind {
-            TopLevelKind::Stmts(ref stmts) => {
-                for stmt in stmts {
+        match self.top_node.kind {
+            TopLevelKind::Function(_, ref body) => {
+                for stmt in body {
                     self.stmt(stmt)
                 }
             }
@@ -145,9 +176,9 @@ impl<'a> Codegen<'a> {
     }
 
     fn addr(&self, expr: &ExprNode) {
-        if let ExprKind::Var(name) = expr.kind {
-            let index: i64 = (name - b'a' + 1).into();
-            println!("  lea {}(%rbp), %rax", -index * 8);
+        if let ExprKind::Var(ref name) = expr.kind {
+            let offset = self.curr_gen_fn.offsets.get(name).unwrap();
+            println!("  lea {}(%rbp), %rax", offset);
             return;
         }
         
@@ -159,4 +190,8 @@ impl<'a> Codegen<'a> {
             panic!("depth is not 0");
         }
     }
+}
+
+fn align_to(n: i64, align: i64) -> usize {
+    (((n + align - 1) / align) * align).try_into().unwrap()
 }
