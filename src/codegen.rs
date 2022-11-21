@@ -68,6 +68,7 @@ impl<'a> Codegen<'a> {
         }
 
         println!();
+        println!(".L.return:");
         println!("  mov %rbp, %rsp");
         println!("  pop %rbp");
         println!("  ret");
@@ -76,6 +77,10 @@ impl<'a> Codegen<'a> {
     fn stmt(&mut self, node: &StmtNode) {
         match node.kind {
             StmtKind::Expr(ref expr) => self.expr(expr),
+            StmtKind::Return(ref expr) => {
+                self.expr(expr);
+                println!("  jmp .L.return");
+            },
         }
     }
 

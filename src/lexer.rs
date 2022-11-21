@@ -4,6 +4,7 @@ use crate::errors::ErrorReporting;
 pub enum TokenKind {
     Punct,
     Ident,
+    Keyword,
     Num(i32),
     Eof
 }
@@ -14,6 +15,10 @@ pub struct Token {
     pub length: usize,
     pub kind: TokenKind
 }
+
+const KEYWORDS: [&[u8];1] = [
+    "return".as_bytes()
+];
 
 pub struct Lexer<'a> {
   src: &'a [u8],
@@ -57,10 +62,17 @@ impl<'a> Lexer<'a> {
                 offset += 1;
                 if !is_ident_cont(src[offset]) { break; }
             }
+            let name = &src[start_offset..offset];
+            let kind = if KEYWORDS.contains(&name) {
+                TokenKind::Keyword
+            }
+            else {
+                TokenKind::Ident
+            };
             toks.push(Token {
                 offset: start_offset,
                 length: offset - start_offset,
-                kind: TokenKind::Ident,
+                kind,
             });
           }
           else {

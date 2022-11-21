@@ -10,7 +10,7 @@
       "request": "launch",
       "program": "${workspaceRoot}/target/debug/chibicc-rs",
       "args": [
-        "a=3; a;"
+        "1; return 2; 3;"
       ],
       "stopAtEntry": false,
       "cwd": "${fileDirname}",

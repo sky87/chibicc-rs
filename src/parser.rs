@@ -32,7 +32,8 @@ pub enum ExprKind {
 
 #[derive(Debug)]
 pub enum StmtKind {
-    Expr(ExprNode)
+    Expr(ExprNode),
+    Return(ExprNode)
 }
 
 #[derive(Debug)]
@@ -68,7 +69,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // stmts = stmt+
+    // function = stmt+
     pub fn function(&mut self) -> TopLevelNode {
         let mut stmts = Vec::new();
         while !self.is_done() {
@@ -77,8 +78,15 @@ impl<'a> Parser<'a> {
         TopLevelNode { kind: TopLevelKind::Function(self.vars.clone().into_iter().collect(), stmts) }
     }
 
-    // stmt = expr-stmt
+    // stmt = "return" expr ";"
+    //      | expr-stmt
     fn stmt(&mut self) -> StmtNode {
+        if self.tok_is("return") {
+            self.advance();
+            let expr = self.expr();
+            self.skip(";");
+            return StmtNode { kind: StmtKind::Return(expr) }
+        }
         self.expr_stmt()
     }
     
