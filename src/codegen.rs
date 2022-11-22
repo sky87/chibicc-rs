@@ -81,6 +81,12 @@ impl<'a> Codegen<'a> {
                 self.expr(expr);
                 println!("  jmp .L.return");
             },
+            StmtKind::Block(ref stmts) => {
+                for stmt in stmts {
+                    self.stmt(stmt)
+                }
+            },
+
         }
     }
 
@@ -186,7 +192,7 @@ impl<'a> Codegen<'a> {
             println!("  lea {}(%rbp), %rax", offset);
             return;
         }
-        
+
         panic!("not an lvalue: {:?}", expr);
     }
 

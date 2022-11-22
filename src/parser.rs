@@ -33,7 +33,8 @@ pub enum ExprKind {
 #[derive(Debug)]
 pub enum StmtKind {
     Expr(ExprNode),
-    Return(ExprNode)
+    Return(ExprNode),
+    Block(Vec<StmtNode>)
 }
 
 #[derive(Debug)]
@@ -79,6 +80,7 @@ impl<'a> Parser<'a> {
     }
 
     // stmt = "return" expr ";"
+    //      | "{" compound-stmt
     //      | expr-stmt
     fn stmt(&mut self) -> StmtNode {
         if self.tok_is("return") {
@@ -87,9 +89,24 @@ impl<'a> Parser<'a> {
             self.skip(";");
             return StmtNode { kind: StmtKind::Return(expr) }
         }
+
+        if self.tok_is("{") {
+            self.advance();
+            return self.compound_stmt()
+        }
+
         self.expr_stmt()
     }
-    
+
+    fn compound_stmt(&mut self) -> StmtNode {
+        let mut stmts = Vec::new();
+        while !self.tok_is("}") {
+            stmts.push(self.stmt());
+        }
+        self.advance();
+        StmtNode { kind: StmtKind::Block(stmts) }
+    }
+
     // expr-stmt = expr ";"
     fn expr_stmt(&mut self) -> StmtNode {
         let expr = self.expr();
@@ -117,7 +134,7 @@ impl<'a> Parser<'a> {
     // equality = relational ("==" relational | "!=" relational)*
     fn equality(&mut self) -> ExprNode {
         let mut node = self.relational();
-        
+
         loop {
             if self.tok_is("==") {
                 self.advance();
@@ -142,7 +159,7 @@ impl<'a> Parser<'a> {
     // relational = add ("<" add | "<=" add | ">" add | ">=" add)*
     fn relational(&mut self) -> ExprNode {
         let mut node = self.add();
-        
+
         loop {
             if self.tok_is("<") {
                 self.advance();
@@ -179,7 +196,7 @@ impl<'a> Parser<'a> {
     // add = mul ("+" mul | "-" mul)*
     fn add(&mut self) -> ExprNode {
         let mut node = self.mul();
-        
+
         loop {
             if self.tok_is("+") {
                 self.advance();
@@ -204,7 +221,7 @@ impl<'a> Parser<'a> {
     // mul = unary ("*" unary | "/" unary)*
     fn mul(&mut self) -> ExprNode {
         let mut node = self.unary();
-        
+
         loop {
             if self.tok_is("*") {
                 self.advance();
@@ -233,7 +250,7 @@ impl<'a> Parser<'a> {
             self.advance();
             return self.unary()
         }
-        
+
         if self.tok_is("-") {
             self.advance();
             return ExprNode { kind: ExprKind::Neg(P::new(self.unary())) }
@@ -256,7 +273,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 return node;
             }
-            TokenKind::Punct => 
+            TokenKind::Punct =>
                 if self.tok_is("(") {
                     self.advance();
                     let node = self.expr();
