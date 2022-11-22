@@ -32,7 +32,8 @@ pub struct Codegen<'a> {
     src: &'a [u8],
     depth: i64,
     top_node: &'a TopLevelNode,
-    curr_gen_fn: GenFunction
+    curr_gen_fn: GenFunction,
+    id_count: usize,
 }
 
 impl<'a> ErrorReporting for Codegen<'a> {
@@ -45,7 +46,8 @@ impl<'a> Codegen<'a> {
             src,
             depth: 0,
             top_node: node,
-            curr_gen_fn: GenFunction::new(node)
+            curr_gen_fn: GenFunction::new(node),
+            id_count: 0
         }
     }
 
@@ -86,7 +88,19 @@ impl<'a> Codegen<'a> {
                     self.stmt(stmt)
                 }
             },
-
+            StmtKind::If(ref cond, ref then_stmt, ref else_stmt) => {
+                let id = self.next_id();
+                self.expr(cond);
+                println!("  cmp $0, %rax");
+                println!("  je .L.else.{}", id);
+                self.stmt(then_stmt);
+                println!("  jmp .L.end.{}", id);
+                println!(".L.else.{}:", id);
+                if let Some(else_stmt) = else_stmt {
+                    self.stmt(else_stmt);
+                }
+                println!(".L.end.{}:", id);
+            }
         }
     }
 
@@ -194,6 +208,11 @@ impl<'a> Codegen<'a> {
         }
 
         panic!("not an lvalue: {:?}", expr);
+    }
+
+    fn next_id(&mut self) -> usize {
+        self.id_count += 1;
+        return self.id_count;
     }
 
     pub fn sanity_checks(&self) {

@@ -34,7 +34,8 @@ pub enum ExprKind {
 pub enum StmtKind {
     Expr(ExprNode),
     Return(ExprNode),
-    Block(Vec<StmtNode>)
+    Block(Vec<StmtNode>),
+    If(P<ExprNode>, P<StmtNode>, Option<P<StmtNode>>),
 }
 
 #[derive(Debug)]
@@ -80,6 +81,7 @@ impl<'a> Parser<'a> {
     }
 
     // stmt = "return" expr ";"
+    //      | "if" "(" expr ")" stmt ("else" stmt)?
     //      | "{" compound-stmt
     //      | expr-stmt
     fn stmt(&mut self) -> StmtNode {
@@ -88,6 +90,20 @@ impl<'a> Parser<'a> {
             let expr = self.expr();
             self.skip(";");
             return StmtNode { kind: StmtKind::Return(expr) }
+        }
+
+        if self.tok_is("if") {
+            self.advance();
+            self.skip("(");
+            let cond = P::new(self.expr());
+            self.skip(")");
+            let then_stmt = P::new(self.stmt());
+            let mut else_stmt = None;
+            if self.tok_is("else") {
+                self.advance();
+                else_stmt = Some(P::new(self.stmt()));
+            }
+            return StmtNode { kind: StmtKind::If(cond, then_stmt, else_stmt) }
         }
 
         if self.tok_is("{") {

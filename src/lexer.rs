@@ -16,8 +16,9 @@ pub struct Token {
     pub kind: TokenKind
 }
 
-const KEYWORDS: [&[u8];1] = [
-    "return".as_bytes()
+const KEYWORDS: [&[u8];3] = [
+    "return".as_bytes(),
+    "if".as_bytes(), "else".as_bytes()
 ];
 
 pub struct Lexer<'a> {
@@ -32,15 +33,15 @@ impl<'a> Lexer<'a> {
     pub fn new(src: &'a [u8]) -> Self {
         Self { src }
     }
-  
+
     pub fn tokenize(&self) -> Vec<Token> {
         let mut toks = Vec::new();
         let mut offset = 0;
         let src = self.src;
-    
+
         while offset < src.len() {
             let c = src[offset];
-    
+
             if c.is_ascii_whitespace() {
                 offset += 1;
             }
@@ -90,7 +91,7 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-    
+
         toks.push(Token { offset, length: 0, kind: TokenKind::Eof });
         toks
     }
@@ -113,8 +114,8 @@ fn read_int(buf: &[u8]) -> (i32, usize) {
 }
 
 fn ispunct(c: u8) -> bool {
-    return c == b';' || c == b'=' || c == b'{' || c == b'}' || 
-        c == b'+' || c == b'-' || c == b'*' || c == b'/' || 
+    return c == b';' || c == b'=' || c == b'{' || c == b'}' ||
+        c == b'+' || c == b'-' || c == b'*' || c == b'/' ||
         c == b'(' || c == b')' || c == b'<' || c == b'>';
 }
 
