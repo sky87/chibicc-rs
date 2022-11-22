@@ -107,8 +107,13 @@ impl<'a> Parser<'a> {
         StmtNode { kind: StmtKind::Block(stmts) }
     }
 
-    // expr-stmt = expr ";"
+    // expr-stmt = expr? ";"
     fn expr_stmt(&mut self) -> StmtNode {
+        if self.tok_is(";") {
+            self.advance();
+            return StmtNode { kind: StmtKind::Block(Vec::new()) }
+        }
+
         let expr = self.expr();
         self.skip(";");
         StmtNode { kind: StmtKind::Expr(expr) }
