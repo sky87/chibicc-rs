@@ -16,9 +16,10 @@ pub struct Token {
     pub kind: TokenKind
 }
 
-const KEYWORDS: [&[u8];3] = [
+const KEYWORDS: [&[u8];4] = [
     "return".as_bytes(),
-    "if".as_bytes(), "else".as_bytes()
+    "if".as_bytes(), "else".as_bytes(),
+    "for".as_bytes()
 ];
 
 pub struct Lexer<'a> {

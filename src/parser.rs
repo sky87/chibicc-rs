@@ -36,6 +36,7 @@ pub enum StmtKind {
     Return(ExprNode),
     Block(Vec<StmtNode>),
     If(P<ExprNode>, P<StmtNode>, Option<P<StmtNode>>),
+    For(P<StmtNode>, Option<P<ExprNode>>, Option<P<ExprNode>>, P<StmtNode>)
 }
 
 #[derive(Debug)]
@@ -82,6 +83,7 @@ impl<'a> Parser<'a> {
 
     // stmt = "return" expr ";"
     //      | "if" "(" expr ")" stmt ("else" stmt)?
+    //      | "for" "( expr-stmt ";" expr? ";" expr? ")" stmt
     //      | "{" compound-stmt
     //      | expr-stmt
     fn stmt(&mut self) -> StmtNode {
@@ -104,6 +106,28 @@ impl<'a> Parser<'a> {
                 else_stmt = Some(P::new(self.stmt()));
             }
             return StmtNode { kind: StmtKind::If(cond, then_stmt, else_stmt) }
+        }
+
+        if self.tok_is("for") {
+            self.advance();
+            self.skip("(");
+            let init = P::new(self.expr_stmt());
+
+            let mut cond = None;
+            if !self.tok_is(";") {
+                cond = Some(P::new(self.expr()));
+            }
+            self.skip(";");
+
+            let mut inc = None;
+            if !self.tok_is(")") {
+                inc = Some(P::new(self.expr()));
+            }
+            self.skip(")");
+
+            let body = P::new(self.stmt());
+
+            return StmtNode { kind: StmtKind::For(init, cond, inc, body) }
         }
 
         if self.tok_is("{") {

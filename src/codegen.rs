@@ -100,7 +100,23 @@ impl<'a> Codegen<'a> {
                     self.stmt(else_stmt);
                 }
                 println!(".L.end.{}:", id);
-            }
+            },
+            StmtKind::For(ref init, ref cond, ref inc, ref body) => {
+                let id = self.next_id();
+                self.stmt(init);
+                println!(".L.begin.{}:", id);
+                if let Some(cond) = cond {
+                    self.expr(cond);
+                    println!("  cmp $0, %rax");
+                    println!("  je .L.end.{}", id);
+                }
+                self.stmt(body);
+                if let Some(inc) = inc {
+                    self.expr(inc);
+                }
+                println!("  jmp .L.begin.{}", id);
+                println!(".L.end.{}:", id);
+            },
         }
     }
 
