@@ -103,7 +103,9 @@ impl<'a> Codegen<'a> {
             },
             StmtKind::For(ref init, ref cond, ref inc, ref body) => {
                 let id = self.next_id();
-                self.stmt(init);
+                if let Some(init) = init {
+                    self.stmt(init);
+                }
                 println!(".L.begin.{}:", id);
                 if let Some(cond) = cond {
                     self.expr(cond);

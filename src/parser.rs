@@ -36,7 +36,7 @@ pub enum StmtKind {
     Return(ExprNode),
     Block(Vec<StmtNode>),
     If(P<ExprNode>, P<StmtNode>, Option<P<StmtNode>>),
-    For(P<StmtNode>, Option<P<ExprNode>>, Option<P<ExprNode>>, P<StmtNode>)
+    For(Option<P<StmtNode>>, Option<P<ExprNode>>, Option<P<ExprNode>>, P<StmtNode>)
 }
 
 #[derive(Debug)]
@@ -84,6 +84,7 @@ impl<'a> Parser<'a> {
     // stmt = "return" expr ";"
     //      | "if" "(" expr ")" stmt ("else" stmt)?
     //      | "for" "( expr-stmt ";" expr? ";" expr? ")" stmt
+    //      | "while" "(" expr ")" stmt
     //      | "{" compound-stmt
     //      | expr-stmt
     fn stmt(&mut self) -> StmtNode {
@@ -111,7 +112,7 @@ impl<'a> Parser<'a> {
         if self.tok_is("for") {
             self.advance();
             self.skip("(");
-            let init = P::new(self.expr_stmt());
+            let init = Some(P::new(self.expr_stmt()));
 
             let mut cond = None;
             if !self.tok_is(";") {
@@ -128,6 +129,15 @@ impl<'a> Parser<'a> {
             let body = P::new(self.stmt());
 
             return StmtNode { kind: StmtKind::For(init, cond, inc, body) }
+        }
+
+        if self.tok_is("while") {
+            self.advance();
+            self.skip("(");
+            let cond = Some(P::new(self.expr()));
+            self.skip(")");
+            let body = P::new(self.stmt());
+            return StmtNode { kind: StmtKind::For(None, cond, None, body)}
         }
 
         if self.tok_is("{") {
