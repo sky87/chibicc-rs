@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 use std::env;
 
 use crate::{lexer::Lexer, parser::Parser, codegen::Codegen};
@@ -21,10 +24,10 @@ fn main() {
 
     let mut parser = Parser::new(src, &toks);
 
-    let node = parser.function();
+    let mut node = parser.function();
     parser.ensure_done();
 
-    let mut codegen = Codegen::new(src, &node);
+    let mut codegen = Codegen::new(src, &mut node);
     codegen.program();
     codegen.sanity_checks();
 }

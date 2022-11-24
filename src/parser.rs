@@ -1,9 +1,12 @@
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::lexer::{Token, TokenKind};
 use crate::errors::ErrorReporting;
 
 pub type P<A> = Box<A>;
+pub type SP<A> = Rc<RefCell<A>>;
 pub type AsciiStr = Vec<u8>;
 
 #[derive(Debug)]
@@ -12,9 +15,15 @@ pub struct Node<Kind> {
 }
 
 #[derive(Debug)]
+pub struct VarData {
+    pub name: AsciiStr,
+    pub stack_offset: i64
+}
+
+#[derive(Debug)]
 pub enum ExprKind {
     Num(i32),
-    Var(AsciiStr),
+    Var(SP<VarData>),
 
     Add(P<ExprNode>, P<ExprNode>),
     Sub(P<ExprNode>, P<ExprNode>),
@@ -41,18 +50,18 @@ pub enum StmtKind {
 
 #[derive(Debug)]
 pub enum TopLevelKind {
-    Function(Vec<AsciiStr>, Vec<StmtNode>)
+    SourceUnit(Vec<SP<VarData>>, Vec<StmtNode>, i64)
 }
 
 pub type ExprNode = Node<ExprKind>;
 pub type StmtNode = Node<StmtKind>;
-pub type TopLevelNode = Node<TopLevelKind>;
+pub type TopLevelNode<'a> = Node<TopLevelKind>;
 
 pub struct Parser<'a> {
     src: &'a [u8],
     toks: &'a [Token],
     tok_index: usize,
-    vars: HashSet<AsciiStr>,
+    vars: HashMap<AsciiStr, SP<VarData>>,
 }
 
 impl<'a> ErrorReporting for Parser<'a> {
@@ -68,7 +77,7 @@ impl<'a> Parser<'a> {
             src,
             toks,
             tok_index: 0,
-            vars: HashSet::new()
+            vars: HashMap::new()
         }
     }
 
@@ -78,7 +87,11 @@ impl<'a> Parser<'a> {
         while !self.is_done() {
             stmts.push(self.stmt())
         }
-        TopLevelNode { kind: TopLevelKind::Function(self.vars.clone().into_iter().collect(), stmts) }
+        let mut locals = Vec::new();
+        for el in self.vars.values() {
+            locals.push(el.clone());
+        }
+        TopLevelNode { kind: TopLevelKind::SourceUnit(locals, stmts, -1) }
     }
 
     // stmt = "return" expr ";"
@@ -323,8 +336,10 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Ident => {
                 let name = self.tok_source(self.peek()).to_owned();
-                let node = ExprNode { kind: ExprKind::Var(name.clone()) };
-                self.vars.insert(name);
+                let var_data = self.vars.entry(name.clone()).or_insert_with(||
+                    Rc::new(RefCell::new(VarData { name, stack_offset: -1 }))
+                );
+                let node = ExprNode { kind: ExprKind::Var(var_data.clone()) };
                 self.advance();
                 return node;
             }

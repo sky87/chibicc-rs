@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::errors::ErrorReporting;
 
 #[derive(Debug)]
@@ -16,11 +18,15 @@ pub struct Token {
     pub kind: TokenKind
 }
 
-const KEYWORDS: [&[u8];5] = [
-    "return".as_bytes(),
-    "if".as_bytes(), "else".as_bytes(),
-    "for".as_bytes(), "while".as_bytes()
-];
+lazy_static! {
+    static ref KEYWORDS: HashSet<&'static [u8]> = {
+        [
+            "return",
+            "if", "else",
+            "for", "while"
+        ].map(|k| k.as_bytes()).into()
+    };
+}
 
 pub struct Lexer<'a> {
     src: &'a [u8],
