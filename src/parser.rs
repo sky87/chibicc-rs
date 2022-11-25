@@ -12,6 +12,7 @@ pub type AsciiStr = Vec<u8>;
 #[derive(Debug)]
 pub struct Node<Kind> {
     pub kind: Kind,
+    pub offset: usize
 }
 
 #[derive(Debug)]
@@ -84,6 +85,7 @@ impl<'a> Parser<'a> {
     // function = stmt+
     pub fn function(&mut self) -> TopLevelNode {
         let mut stmts = Vec::new();
+        let offset = self.peek().offset;
         while !self.is_done() {
             stmts.push(self.stmt())
         }
@@ -91,7 +93,7 @@ impl<'a> Parser<'a> {
         for el in self.vars.values() {
             locals.push(el.clone());
         }
-        TopLevelNode { kind: TopLevelKind::SourceUnit(locals, stmts, -1) }
+        TopLevelNode { kind: TopLevelKind::SourceUnit(locals, stmts, -1), offset }
     }
 
     // stmt = "return" expr ";"
@@ -102,14 +104,14 @@ impl<'a> Parser<'a> {
     //      | expr-stmt
     fn stmt(&mut self) -> StmtNode {
         if self.tok_is("return") {
-            self.advance();
+            let offset = self.advance().offset;
             let expr = self.expr();
             self.skip(";");
-            return StmtNode { kind: StmtKind::Return(expr) }
+            return StmtNode { kind: StmtKind::Return(expr), offset }
         }
 
         if self.tok_is("if") {
-            self.advance();
+            let offset = self.advance().offset;
             self.skip("(");
             let cond = P::new(self.expr());
             self.skip(")");
@@ -119,11 +121,11 @@ impl<'a> Parser<'a> {
                 self.advance();
                 else_stmt = Some(P::new(self.stmt()));
             }
-            return StmtNode { kind: StmtKind::If(cond, then_stmt, else_stmt) }
+            return StmtNode { kind: StmtKind::If(cond, then_stmt, else_stmt), offset }
         }
 
         if self.tok_is("for") {
-            self.advance();
+            let offset = self.advance().offset;
             self.skip("(");
             let init = Some(P::new(self.expr_stmt()));
 
@@ -141,45 +143,47 @@ impl<'a> Parser<'a> {
 
             let body = P::new(self.stmt());
 
-            return StmtNode { kind: StmtKind::For(init, cond, inc, body) }
+            return StmtNode { kind: StmtKind::For(init, cond, inc, body), offset }
         }
 
         if self.tok_is("while") {
-            self.advance();
+            let offset = self.advance().offset;
             self.skip("(");
             let cond = Some(P::new(self.expr()));
             self.skip(")");
             let body = P::new(self.stmt());
-            return StmtNode { kind: StmtKind::For(None, cond, None, body)}
+            return StmtNode { kind: StmtKind::For(None, cond, None, body), offset }
         }
 
         if self.tok_is("{") {
-            self.advance();
             return self.compound_stmt()
         }
 
         self.expr_stmt()
     }
 
+    // compound_stmt = "{" stmt+ "}
     fn compound_stmt(&mut self) -> StmtNode {
+        let offset = self.skip("{").offset;
         let mut stmts = Vec::new();
         while !self.tok_is("}") {
             stmts.push(self.stmt());
         }
         self.advance();
-        StmtNode { kind: StmtKind::Block(stmts) }
+        StmtNode { kind: StmtKind::Block(stmts), offset }
     }
 
     // expr-stmt = expr? ";"
     fn expr_stmt(&mut self) -> StmtNode {
         if self.tok_is(";") {
-            self.advance();
-            return StmtNode { kind: StmtKind::Block(Vec::new()) }
+            let offset = self.advance().offset;
+            return StmtNode { kind: StmtKind::Block(Vec::new()), offset }
         }
 
         let expr = self.expr();
+        let offset = expr.offset;
         self.skip(";");
-        StmtNode { kind: StmtKind::Expr(expr) }
+        StmtNode { kind: StmtKind::Expr(expr), offset }
     }
 
     // expr = assign
@@ -191,9 +195,10 @@ impl<'a> Parser<'a> {
     fn assign(&mut self) -> ExprNode {
         let mut node = self.equality();
         if self.tok_is("=") {
-            self.advance();
+            let offset = self.advance().offset;
             node = ExprNode {
-                kind: ExprKind::Assign(P::new(node), P::new(self.assign()))
+                kind: ExprKind::Assign(P::new(node), P::new(self.assign())),
+                offset
             };
         }
         node
@@ -205,15 +210,17 @@ impl<'a> Parser<'a> {
 
         loop {
             if self.tok_is("==") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Eq(P::new(node), P::new(self.relational()))
+                    kind: ExprKind::Eq(P::new(node), P::new(self.relational())),
+                    offset
                 };
             }
             else if self.tok_is("!=") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Ne(P::new(node), P::new(self.relational()))
+                    kind: ExprKind::Ne(P::new(node), P::new(self.relational())),
+                    offset
                 };
             }
             else {
@@ -230,27 +237,31 @@ impl<'a> Parser<'a> {
 
         loop {
             if self.tok_is("<") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Lt(P::new(node), P::new(self.add()))
+                    kind: ExprKind::Lt(P::new(node), P::new(self.add())),
+                    offset
                 };
             }
             else if self.tok_is("<=") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Le(P::new(node), P::new(self.add()) )
+                    kind: ExprKind::Le(P::new(node), P::new(self.add())),
+                    offset
                 };
             }
             else if self.tok_is(">") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Lt(P::new(self.add()), P::new(node))
+                    kind: ExprKind::Lt(P::new(self.add()), P::new(node)),
+                    offset
                 };
             }
             else if self.tok_is(">=") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Le(P::new(self.add()), P::new(node))
+                    kind: ExprKind::Le(P::new(self.add()), P::new(node)),
+                    offset
                 };
             }
             else {
@@ -267,15 +278,17 @@ impl<'a> Parser<'a> {
 
         loop {
             if self.tok_is("+") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Add(P::new(node), P::new(self.mul()))
+                    kind: ExprKind::Add(P::new(node), P::new(self.mul())),
+                    offset
                 };
             }
             else if self.tok_is("-") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Sub(P::new(node), P::new(self.mul()))
+                    kind: ExprKind::Sub(P::new(node), P::new(self.mul())),
+                    offset
                 };
             }
             else {
@@ -292,15 +305,17 @@ impl<'a> Parser<'a> {
 
         loop {
             if self.tok_is("*") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Mul(P::new(node), P::new(self.unary()))
+                    kind: ExprKind::Mul(P::new(node), P::new(self.unary())),
+                    offset
                 };
             }
             else if self.tok_is("/") {
-                self.advance();
+                let offset = self.advance().offset;
                 node = ExprNode {
-                    kind: ExprKind::Div(P::new(node), P::new(self.unary()))
+                    kind: ExprKind::Div(P::new(node), P::new(self.unary())),
+                    offset
                 };
             }
             else {
@@ -320,8 +335,8 @@ impl<'a> Parser<'a> {
         }
 
         if self.tok_is("-") {
-            self.advance();
-            return ExprNode { kind: ExprKind::Neg(P::new(self.unary())) }
+            let offset = self.advance().offset;
+            return ExprNode { kind: ExprKind::Neg(P::new(self.unary())), offset }
         }
 
         self.primary()
@@ -331,17 +346,19 @@ impl<'a> Parser<'a> {
     fn primary(&mut self) -> ExprNode {
         match self.peek().kind {
             TokenKind::Num(val) => {
-                self.advance();
-                return ExprNode { kind: ExprKind::Num(val) }
+                let offset = self.advance().offset;
+                return ExprNode { kind: ExprKind::Num(val), offset }
             }
             TokenKind::Ident => {
-                let name = self.tok_source(self.peek()).to_owned();
+                let tok = self.peek();
+                let offset = tok.offset;
+                let name = self.tok_source(tok).to_owned();
                 let var_data = self.vars.entry(name.clone()).or_insert_with(||
                     Rc::new(RefCell::new(VarData { name, stack_offset: -1 }))
                 );
-                let node = ExprNode { kind: ExprKind::Var(var_data.clone()) };
+                let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), offset };
                 self.advance();
-                return node;
+                return expr;
             }
             TokenKind::Punct =>
                 if self.tok_is("(") {
@@ -356,11 +373,13 @@ impl<'a> Parser<'a> {
     }
 
     fn peek(&self) -> &Token { &self.toks[self.tok_index] }
-    fn advance(&mut self) {
+    fn advance(&mut self) -> &Token {
         if self.tok_index >= self.toks.len() {
             panic!("Unexpected end of file");
         }
+        let tok = &self.toks[self.tok_index];
         self.tok_index += 1;
+        tok
     }
 
     fn tok_source(&self, tok: &Token) -> &[u8] {
@@ -371,11 +390,11 @@ impl<'a> Parser<'a> {
         self.tok_source(self.peek()).eq(s.as_bytes())
     }
 
-    fn skip(&mut self, s: &str) {
+    fn skip(&mut self, s: &str) -> &Token {
         if !self.tok_is(s) {
             self.error_tok(self.peek(), &format!("Expected {}", s));
         }
-        self.advance();
+        self.advance()
     }
 
     fn is_done(&self) -> bool {

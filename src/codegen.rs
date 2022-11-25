@@ -209,7 +209,7 @@ impl<'a> Codegen<'a> {
             return;
         }
 
-        panic!("not an lvalue: {:?}", expr);
+        self.error_at(expr.offset, "not an lvalue");
     }
 
     fn next_id(&mut self) -> usize {
