@@ -123,7 +123,7 @@ fn read_int(buf: &[u8]) -> (i32, usize) {
 fn ispunct(c: u8) -> bool {
     return c == b';' || c == b'=' || c == b'{' || c == b'}' ||
         c == b'+' || c == b'-' || c == b'*' || c == b'/' ||
-        c == b'(' || c == b')' || c == b'<' || c == b'>';
+        c == b'(' || c == b')' || c == b'<' || c == b'>' || c == b'&';
 }
 
 fn is_ident_start(c: u8) -> bool {

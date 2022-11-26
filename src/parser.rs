@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::lexer::{Token, TokenKind};
@@ -25,6 +24,9 @@ pub struct VarData {
 pub enum ExprKind {
     Num(i32),
     Var(SP<VarData>),
+
+    Addr(P<ExprNode>),
+    Deref(P<ExprNode>),
 
     Add(P<ExprNode>, P<ExprNode>),
     Sub(P<ExprNode>, P<ExprNode>),
@@ -62,7 +64,7 @@ pub struct Parser<'a> {
     src: &'a [u8],
     toks: &'a [Token],
     tok_index: usize,
-    vars: HashMap<AsciiStr, SP<VarData>>,
+    vars: Vec<SP<VarData>>,
 }
 
 impl<'a> ErrorReporting for Parser<'a> {
@@ -78,21 +80,20 @@ impl<'a> Parser<'a> {
             src,
             toks,
             tok_index: 0,
-            vars: HashMap::new()
+            vars: Vec::new()
         }
     }
 
-    // function = stmt+
-    pub fn function(&mut self) -> TopLevelNode {
+    // source_unit = stmt+
+    pub fn source_unit(&mut self) -> TopLevelNode {
         let mut stmts = Vec::new();
         let offset = self.peek().offset;
         while !self.is_done() {
             stmts.push(self.stmt())
         }
-        let mut locals = Vec::new();
-        for el in self.vars.values() {
-            locals.push(el.clone());
-        }
+
+        // Reverse them to keep the locals layout in line with chibicc
+        let locals = self.vars.clone().into_iter().rev().collect();
         TopLevelNode { kind: TopLevelKind::SourceUnit(locals, stmts, -1), offset }
     }
 
@@ -326,7 +327,7 @@ impl<'a> Parser<'a> {
         node
     }
 
-    // unary = ("+" | "-") unary
+    // unary = ("+" | "-" | "*" | "&") unary
     //       | primary
     fn unary(&mut self) -> ExprNode {
         if self.tok_is("+") {
@@ -337,6 +338,16 @@ impl<'a> Parser<'a> {
         if self.tok_is("-") {
             let offset = self.advance().offset;
             return ExprNode { kind: ExprKind::Neg(P::new(self.unary())), offset }
+        }
+
+        if self.tok_is("&") {
+            let offset = self.advance().offset;
+            return ExprNode { kind: ExprKind::Addr(P::new(self.unary())), offset }
+        }
+
+        if self.tok_is("*") {
+            let offset = self.advance().offset;
+            return ExprNode { kind: ExprKind::Deref(P::new(self.unary())), offset }
         }
 
         self.primary()
@@ -353,9 +364,14 @@ impl<'a> Parser<'a> {
                 let tok = self.peek();
                 let offset = tok.offset;
                 let name = self.tok_source(tok).to_owned();
-                let var_data = self.vars.entry(name.clone()).or_insert_with(||
-                    Rc::new(RefCell::new(VarData { name, stack_offset: -1 }))
-                );
+                let var_data =
+                    match self.vars.iter().find(|v| v.borrow().name == name) {
+                        Some(var_data) => var_data,
+                        None => {
+                            self.vars.push(Rc::new(RefCell::new(VarData { name, stack_offset: -1 })));
+                            self.vars.last().unwrap()
+                        }
+                    };
                 let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), offset };
                 self.advance();
                 return expr;

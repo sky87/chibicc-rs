@@ -7,7 +7,9 @@ fn update_stack_info(node: &mut TopLevelNode) {
             let mut offset = 0;
             for local in locals {
                 offset -= 8;
-                local.borrow_mut().stack_offset = offset;
+                let mut local = local.borrow_mut();
+                local.stack_offset = offset;
+                println!("# Var {} offset {}", String::from_utf8_lossy(&local.name), local.stack_offset);
             }
             *stack_size = align_to(-offset, 16);
         }
@@ -128,6 +130,13 @@ impl<'a> Codegen<'a> {
                 self.addr(node);
                 println!("  mov (%rax), %rax");
             }
+            ExprKind::Addr(ref expr) => {
+                self.addr(expr);
+            },
+            ExprKind::Deref(ref expr) => {
+                self.expr(expr);
+                println!("  mov (%rax), %rax");
+            },
             ExprKind::Assign(ref lhs, ref rhs) => {
                 self.addr(lhs);
                 self.push();
@@ -199,17 +208,20 @@ impl<'a> Codegen<'a> {
                 println!("  cmp %rdi, %rax");
                 println!("  setl %al");
                 println!("  movzb %al, %rax");
-            }
+            },
         };
     }
 
-    fn addr(&self, expr: &ExprNode) {
-        if let ExprKind::Var(ref data) = expr.kind {
-            println!("  lea {}(%rbp), %rax", &data.borrow().stack_offset);
-            return;
-        }
-
-        self.error_at(expr.offset, "not an lvalue");
+    fn addr(&mut self, expr: &ExprNode) {
+        match expr.kind {
+            ExprKind::Var(ref data) => {
+                println!("  lea {}(%rbp), %rax", &data.borrow().stack_offset);
+            },
+            ExprKind::Deref(ref expr) => {
+                self.expr(expr);
+            }
+            _ => self.error_at(expr.offset, "not an lvalue"),
+        };
     }
 
     fn next_id(&mut self) -> usize {
