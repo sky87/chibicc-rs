@@ -1,1 +1,2 @@
-This is port of [chibicc](https://github.com/rui314/chibicc) to learn/play around with Rust.
+This is a port of [chibicc](https://github.com/rui314/chibicc) from C to Rust to learn/play around with Rust.
+I'm trying to stick to the original commit sequence when adding features, but the implementation is more "Rusty" and in places can differ substantially from the C version.
