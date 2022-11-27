@@ -7,7 +7,7 @@ pub enum TokenKind {
     Punct,
     Ident,
     Keyword,
-    Num(i32),
+    Num(i64),
     Eof
 }
 
@@ -104,14 +104,14 @@ impl<'a> Lexer<'a> {
     }
 }
 
-fn read_int(buf: &[u8]) -> (i32, usize) {
-    let mut acc: i32 = 0;
+fn read_int(buf: &[u8]) -> (i64, usize) {
+    let mut acc = 0;
     let mut offset = 0;
     while offset < buf.len() {
         let b = buf[offset];
         if b.is_ascii_digit() {
             offset += 1;
-            acc = acc * 10 + i32::from(b - b'0');
+            acc = acc * 10 + i64::from(b - b'0');
         }
         else {
             break;
