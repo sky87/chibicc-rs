@@ -37,6 +37,8 @@ pub enum ExprKind {
     Addr(P<ExprNode>),
     Deref(P<ExprNode>),
 
+    Funcall(AsciiStr),
+
     Add(P<ExprNode>, P<ExprNode>),
     Sub(P<ExprNode>, P<ExprNode>),
     Mul(P<ExprNode>, P<ExprNode>),
@@ -501,7 +503,8 @@ impl<'a> Parser<'a> {
         self.primary()
     }
 
-    // primary = "(" expr ")" | ident | num
+    // primary = "(" expr ")" | ident args? | num
+    // args = "(" ")"
     fn primary(&mut self) -> ExprNode {
         match self.peek().kind {
             TokenKind::Num(val) => {
@@ -512,10 +515,18 @@ impl<'a> Parser<'a> {
                 let tok = self.peek();
                 let offset = tok.offset;
                 let name = self.tok_source(tok).to_owned();
+                self.advance();
+
+                if self.tok_is("(") {
+                    self.advance();
+                    let node = ExprNode { kind: ExprKind::Funcall(name), offset, ty: Ty::Int };
+                    self.skip(")");
+                    return node;
+                }
+
                 let var_data = self.vars.iter().find(|v| v.borrow().name == name);
                 if let Some(var_data) = var_data {
                     let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), offset, ty: Ty::Int };
-                    self.advance();
                     return expr;
                 }
                 else {

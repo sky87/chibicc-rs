@@ -130,13 +130,17 @@ impl<'a> Codegen<'a> {
                 self.addr(node);
                 println!("  mov (%rax), %rax");
             }
+            ExprKind::Funcall(ref name) => {
+                println!("  mov $0, %rax");
+                println!("  call {}", String::from_utf8_lossy(name));
+            }
             ExprKind::Addr(ref expr) => {
                 self.addr(expr);
-            },
+            }
             ExprKind::Deref(ref expr) => {
                 self.expr(expr);
                 println!("  mov (%rax), %rax");
-            },
+            }
             ExprKind::Assign(ref lhs, ref rhs) => {
                 self.addr(lhs);
                 self.push();
@@ -150,21 +154,21 @@ impl<'a> Codegen<'a> {
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
                 println!("  add %rdi, %rax");
-            },
+            }
             ExprKind::Sub(ref lhs, ref rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
                 println!("  sub %rdi, %rax");
-            },
+            }
             ExprKind::Mul(ref lhs, ref rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
                 println!("  imul %rdi, %rax");
-            },
+            }
             ExprKind::Div(ref lhs, ref rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
@@ -172,7 +176,7 @@ impl<'a> Codegen<'a> {
                 self.pop("%rdi");
                 println!("  cqo");
                 println!("  idiv %rdi, %rax");
-            },
+            }
             ExprKind::Eq(ref lhs, ref rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
@@ -181,7 +185,7 @@ impl<'a> Codegen<'a> {
                 println!("  cmp %rdi, %rax");
                 println!("  sete %al");
                 println!("  movzb %al, %rax");
-            },
+            }
             ExprKind::Ne(ref lhs, ref rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
@@ -190,7 +194,7 @@ impl<'a> Codegen<'a> {
                 println!("  cmp %rdi, %rax");
                 println!("  setne %al");
                 println!("  movzb %al, %rax");
-            },
+            }
             ExprKind::Le(ref lhs, ref rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
@@ -199,7 +203,7 @@ impl<'a> Codegen<'a> {
                 println!("  cmp %rdi, %rax");
                 println!("  setle %al");
                 println!("  movzb %al, %rax");
-            },
+            }
             ExprKind::Lt(ref lhs, ref rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
@@ -208,7 +212,7 @@ impl<'a> Codegen<'a> {
                 println!("  cmp %rdi, %rax");
                 println!("  setl %al");
                 println!("  movzb %al, %rax");
-            },
+            }
         };
     }
 
