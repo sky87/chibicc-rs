@@ -25,6 +25,7 @@ pub struct Node<Kind> {
 #[derive(Debug)]
 pub struct VarData {
     pub name: AsciiStr,
+    pub ty: Ty,
     pub stack_offset: i64
 }
 
@@ -96,9 +97,7 @@ impl<'a> Parser<'a> {
     pub fn source_unit(&mut self) -> TopLevelNode {
         let mut stmts = Vec::new();
         let offset = self.peek().offset;
-        while !self.is_done() {
-            stmts.push(self.stmt())
-        }
+        stmts.push(self.compound_stmt());
 
         // Reverse them to keep the locals layout in line with chibicc
         let locals = self.vars.clone().into_iter().rev().collect();
@@ -171,15 +170,80 @@ impl<'a> Parser<'a> {
         self.expr_stmt()
     }
 
-    // compound_stmt = "{" stmt+ "}
+    // compound_stmt = "{" (declaration | stmt)* "}
     fn compound_stmt(&mut self) -> StmtNode {
         let offset = self.skip("{").offset;
         let mut stmts = Vec::new();
         while !self.tok_is("}") {
-            stmts.push(self.stmt());
+            if self.tok_is("int") {
+                self.declaration(&mut stmts);
+            }
+            else {
+                stmts.push(self.stmt());
+            }
         }
         self.advance();
         StmtNode { kind: StmtKind::Block(stmts), offset, ty: Ty::Unit }
+    }
+
+    // declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
+    fn  declaration(&mut self, stmts: &mut Vec<StmtNode>) {
+        let base_ty = self.declspec();
+
+        let mut count = 0;
+        while !self.tok_is(";") {
+            if count > 0 {
+                self.skip(",");
+            }
+            count += 1;
+
+            let offset = self.peek().offset;
+            let (ty, name) = self.declarator(&base_ty);
+            let var_data = Rc::new(RefCell::new(VarData { name, ty: ty.clone(), stack_offset: -1 }));
+            self.vars.push(var_data.clone());
+
+            if !self.tok_is("=") {
+                continue;
+            }
+
+            self.advance();
+            let lhs = ExprNode { kind: ExprKind::Var(var_data), offset, ty };
+            let rhs = self.assign();
+            let rhs_ty = rhs.ty.clone();
+            stmts.push(StmtNode {
+                kind: StmtKind::Expr(ExprNode {
+                    kind: ExprKind::Assign(P::new(lhs), P::new(rhs)),
+                    offset,
+                    ty: rhs_ty,
+                }),
+                offset,
+                ty: Ty::Unit
+            });
+        }
+    }
+
+    // declspec = "int"
+    fn declspec(&mut self) -> Ty {
+        self.skip("int");
+        Ty::Int
+    }
+
+    // declarator = "*"* ident
+    fn declarator(&mut self, base_ty: &Ty) -> (Ty, AsciiStr) {
+        let mut ty = base_ty.clone();
+        while self.tok_is("*") {
+            self.advance();
+            ty = Ty::Ptr(P::new(ty));
+        }
+
+        match self.peek().kind {
+            TokenKind::Ident => {
+                let name = self.tok_source(self.peek()).to_owned();
+                self.advance();
+                (ty, name)
+            },
+            _ => self.error_tok(self.peek(), "expected a variable name")
+        }
     }
 
     // expr-stmt = expr? ";"
@@ -448,17 +512,15 @@ impl<'a> Parser<'a> {
                 let tok = self.peek();
                 let offset = tok.offset;
                 let name = self.tok_source(tok).to_owned();
-                let var_data =
-                    match self.vars.iter().find(|v| v.borrow().name == name) {
-                        Some(var_data) => var_data,
-                        None => {
-                            self.vars.push(Rc::new(RefCell::new(VarData { name, stack_offset: -1 })));
-                            self.vars.last().unwrap()
-                        }
-                    };
-                let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), offset, ty: Ty::Int };
-                self.advance();
-                return expr;
+                let var_data = self.vars.iter().find(|v| v.borrow().name == name);
+                if let Some(var_data) = var_data {
+                    let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), offset, ty: Ty::Int };
+                    self.advance();
+                    return expr;
+                }
+                else {
+                    self.error_at(offset, "undefined variable");
+                }
             }
             TokenKind::Punct =>
                 if self.tok_is("(") {

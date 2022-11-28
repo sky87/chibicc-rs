@@ -23,7 +23,8 @@ lazy_static! {
         [
             "return",
             "if", "else",
-            "for", "while"
+            "for", "while",
+            "int"
         ].map(|k| k.as_bytes()).into()
     };
 }
@@ -121,7 +122,7 @@ fn read_int(buf: &[u8]) -> (i64, usize) {
 }
 
 fn ispunct(c: u8) -> bool {
-    return c == b';' || c == b'=' || c == b'{' || c == b'}' ||
+    return c == b';' || c == b'=' || c == b'{' || c == b'}' || c == b',' ||
         c == b'+' || c == b'-' || c == b'*' || c == b'/' ||
         c == b'(' || c == b')' || c == b'<' || c == b'>' || c == b'&';
 }
