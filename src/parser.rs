@@ -37,7 +37,7 @@ pub enum ExprKind {
     Addr(P<ExprNode>),
     Deref(P<ExprNode>),
 
-    Funcall(AsciiStr),
+    Funcall(AsciiStr, Vec<P<ExprNode>>),
 
     Add(P<ExprNode>, P<ExprNode>),
     Sub(P<ExprNode>, P<ExprNode>),
@@ -113,40 +113,40 @@ impl<'a> Parser<'a> {
     //      | "{" compound-stmt
     //      | expr-stmt
     fn stmt(&mut self) -> StmtNode {
-        if self.tok_is("return") {
+        if self.peek_is("return") {
             let offset = self.advance().offset;
             let expr = self.expr();
             self.skip(";");
             return StmtNode { kind: StmtKind::Return(expr), offset, ty: Ty::Unit }
         }
 
-        if self.tok_is("if") {
+        if self.peek_is("if") {
             let offset = self.advance().offset;
             self.skip("(");
             let cond = P::new(self.expr());
             self.skip(")");
             let then_stmt = P::new(self.stmt());
             let mut else_stmt = None;
-            if self.tok_is("else") {
+            if self.peek_is("else") {
                 self.advance();
                 else_stmt = Some(P::new(self.stmt()));
             }
             return StmtNode { kind: StmtKind::If(cond, then_stmt, else_stmt), offset, ty: Ty::Unit }
         }
 
-        if self.tok_is("for") {
+        if self.peek_is("for") {
             let offset = self.advance().offset;
             self.skip("(");
             let init = Some(P::new(self.expr_stmt()));
 
             let mut cond = None;
-            if !self.tok_is(";") {
+            if !self.peek_is(";") {
                 cond = Some(P::new(self.expr()));
             }
             self.skip(";");
 
             let mut inc = None;
-            if !self.tok_is(")") {
+            if !self.peek_is(")") {
                 inc = Some(P::new(self.expr()));
             }
             self.skip(")");
@@ -156,7 +156,7 @@ impl<'a> Parser<'a> {
             return StmtNode { kind: StmtKind::For(init, cond, inc, body), offset, ty: Ty::Unit }
         }
 
-        if self.tok_is("while") {
+        if self.peek_is("while") {
             let offset = self.advance().offset;
             self.skip("(");
             let cond = Some(P::new(self.expr()));
@@ -165,7 +165,7 @@ impl<'a> Parser<'a> {
             return StmtNode { kind: StmtKind::For(None, cond, None, body), offset, ty: Ty::Unit }
         }
 
-        if self.tok_is("{") {
+        if self.peek_is("{") {
             return self.compound_stmt()
         }
 
@@ -176,8 +176,8 @@ impl<'a> Parser<'a> {
     fn compound_stmt(&mut self) -> StmtNode {
         let offset = self.skip("{").offset;
         let mut stmts = Vec::new();
-        while !self.tok_is("}") {
-            if self.tok_is("int") {
+        while !self.peek_is("}") {
+            if self.peek_is("int") {
                 self.declaration(&mut stmts);
             }
             else {
@@ -193,7 +193,7 @@ impl<'a> Parser<'a> {
         let base_ty = self.declspec();
 
         let mut count = 0;
-        while !self.tok_is(";") {
+        while !self.peek_is(";") {
             if count > 0 {
                 self.skip(",");
             }
@@ -204,7 +204,7 @@ impl<'a> Parser<'a> {
             let var_data = Rc::new(RefCell::new(VarData { name, ty: ty.clone(), stack_offset: -1 }));
             self.vars.push(var_data.clone());
 
-            if !self.tok_is("=") {
+            if !self.peek_is("=") {
                 continue;
             }
 
@@ -233,7 +233,7 @@ impl<'a> Parser<'a> {
     // declarator = "*"* ident
     fn declarator(&mut self, base_ty: &Ty) -> (Ty, AsciiStr) {
         let mut ty = base_ty.clone();
-        while self.tok_is("*") {
+        while self.peek_is("*") {
             self.advance();
             ty = Ty::Ptr(P::new(ty));
         }
@@ -250,7 +250,7 @@ impl<'a> Parser<'a> {
 
     // expr-stmt = expr? ";"
     fn expr_stmt(&mut self) -> StmtNode {
-        if self.tok_is(";") {
+        if self.peek_is(";") {
             let offset = self.advance().offset;
             return StmtNode { kind: StmtKind::Block(Vec::new()), offset, ty: Ty::Unit }
         }
@@ -269,7 +269,7 @@ impl<'a> Parser<'a> {
     // assign = equality ("=" assign)?
     fn assign(&mut self) -> ExprNode {
         let mut node = self.equality();
-        if self.tok_is("=") {
+        if self.peek_is("=") {
             let offset = self.advance().offset;
             let rhs = P::new(self.assign());
             let ty = node.ty.clone();
@@ -287,7 +287,7 @@ impl<'a> Parser<'a> {
         let mut node = self.relational();
 
         loop {
-            if self.tok_is("==") {
+            if self.peek_is("==") {
                 let offset = self.advance().offset;
                 node = ExprNode {
                     kind: ExprKind::Eq(P::new(node), P::new(self.relational())),
@@ -295,7 +295,7 @@ impl<'a> Parser<'a> {
                     ty: Ty::Int
                 };
             }
-            else if self.tok_is("!=") {
+            else if self.peek_is("!=") {
                 let offset = self.advance().offset;
                 node = ExprNode {
                     kind: ExprKind::Ne(P::new(node), P::new(self.relational())),
@@ -316,7 +316,7 @@ impl<'a> Parser<'a> {
         let mut node = self.add();
 
         loop {
-            if self.tok_is("<") {
+            if self.peek_is("<") {
                 let offset = self.advance().offset;
                 node = ExprNode {
                     kind: ExprKind::Lt(P::new(node), P::new(self.add())),
@@ -324,7 +324,7 @@ impl<'a> Parser<'a> {
                     ty: Ty::Int
                 };
             }
-            else if self.tok_is("<=") {
+            else if self.peek_is("<=") {
                 let offset = self.advance().offset;
                 node = ExprNode {
                     kind: ExprKind::Le(P::new(node), P::new(self.add())),
@@ -332,7 +332,7 @@ impl<'a> Parser<'a> {
                     ty: Ty::Int
                 };
             }
-            else if self.tok_is(">") {
+            else if self.peek_is(">") {
                 let offset = self.advance().offset;
                 node = ExprNode {
                     kind: ExprKind::Lt(P::new(self.add()), P::new(node)),
@@ -340,7 +340,7 @@ impl<'a> Parser<'a> {
                     ty: Ty::Int
                 };
             }
-            else if self.tok_is(">=") {
+            else if self.peek_is(">=") {
                 let offset = self.advance().offset;
                 node = ExprNode {
                     kind: ExprKind::Le(P::new(self.add()), P::new(node)),
@@ -361,12 +361,12 @@ impl<'a> Parser<'a> {
         let mut node = self.mul();
 
         loop {
-            if self.tok_is("+") {
+            if self.peek_is("+") {
                 let offset = self.advance().offset;
                 let rhs = P::new(self.mul());
                 node = self.add_overload(P::new(node), rhs, offset);
             }
-            else if self.tok_is("-") {
+            else if self.peek_is("-") {
                 let offset = self.advance().offset;
                 let rhs = P::new(self.mul());
                 node = self.sub_overload(P::new(node), rhs, offset);
@@ -441,7 +441,7 @@ impl<'a> Parser<'a> {
         let mut node = self.unary();
 
         loop {
-            if self.tok_is("*") {
+            if self.peek_is("*") {
                 let offset = self.advance().offset;
                 let ty = node.ty.clone();
                 node = ExprNode {
@@ -450,7 +450,7 @@ impl<'a> Parser<'a> {
                     ty
                 };
             }
-            else if self.tok_is("/") {
+            else if self.peek_is("/") {
                 let offset = self.advance().offset;
                 let ty = node.ty.clone();
                 node = ExprNode {
@@ -470,26 +470,26 @@ impl<'a> Parser<'a> {
     // unary = ("+" | "-" | "*" | "&") unary
     //       | primary
     fn unary(&mut self) -> ExprNode {
-        if self.tok_is("+") {
+        if self.peek_is("+") {
             self.advance();
             return self.unary()
         }
 
-        if self.tok_is("-") {
+        if self.peek_is("-") {
             let offset = self.advance().offset;
             let node = P::new(self.unary());
             let ty = node.ty.clone();
             return ExprNode { kind: ExprKind::Neg(node), offset, ty }
         }
 
-        if self.tok_is("&") {
+        if self.peek_is("&") {
             let offset = self.advance().offset;
             let node = P::new(self.unary());
             let ty = Ty::Ptr(P::new(node.ty.clone()));
             return ExprNode { kind: ExprKind::Addr(node), offset, ty }
         }
 
-        if self.tok_is("*") {
+        if self.peek_is("*") {
             let offset = self.advance().offset;
             let node = P::new(self.unary());
             let ty = if let Ty::Ptr(ref base) = node.ty {
@@ -503,8 +503,7 @@ impl<'a> Parser<'a> {
         self.primary()
     }
 
-    // primary = "(" expr ")" | ident args? | num
-    // args = "(" ")"
+    // primary = "(" expr ")" | funcall | num
     fn primary(&mut self) -> ExprNode {
         match self.peek().kind {
             TokenKind::Num(val) => {
@@ -512,17 +511,14 @@ impl<'a> Parser<'a> {
                 return ExprNode { kind: ExprKind::Num(val), offset, ty: Ty::Int }
             }
             TokenKind::Ident => {
+                if self.la_is(1, "(") {
+                    return self.funcall();
+                }
+
                 let tok = self.peek();
                 let offset = tok.offset;
                 let name = self.tok_source(tok).to_owned();
                 self.advance();
-
-                if self.tok_is("(") {
-                    self.advance();
-                    let node = ExprNode { kind: ExprKind::Funcall(name), offset, ty: Ty::Int };
-                    self.skip(")");
-                    return node;
-                }
 
                 let var_data = self.vars.iter().find(|v| v.borrow().name == name);
                 if let Some(var_data) = var_data {
@@ -534,7 +530,7 @@ impl<'a> Parser<'a> {
                 }
             }
             TokenKind::Punct =>
-                if self.tok_is("(") {
+                if self.peek_is("(") {
                     self.advance();
                     let node = self.expr();
                     self.skip(")");
@@ -545,7 +541,32 @@ impl<'a> Parser<'a> {
         self.error_tok(self.peek(), "expected an expression");
     }
 
+    // funcall = ident "(" (assign ("," assign)*)? ")"
+    fn funcall(&mut self) -> ExprNode {
+        let tok = self.peek();
+        let offset = tok.offset;
+        let fn_name = self.tok_source(tok).to_owned();
+        self.advance();
+
+        let mut args = Vec::new();
+        self.skip("(");
+        while !self.peek_is(")") {
+            if args.len() > 0 {
+                self.skip(",");
+            }
+            args.push(P::new(self.assign()));
+        }
+        self.skip(")");
+
+        ExprNode {
+            kind: ExprKind::Funcall(fn_name, args),
+            offset,
+            ty: Ty::Int,
+        }
+    }
+
     fn peek(&self) -> &Token { &self.toks[self.tok_index] }
+    fn la(&self, n: usize) -> &Token { &self.toks[self.tok_index + n] }
     fn advance(&mut self) -> &Token {
         if self.tok_index >= self.toks.len() {
             panic!("Unexpected end of file");
@@ -559,12 +580,16 @@ impl<'a> Parser<'a> {
         &self.src[tok.offset..(tok.offset + tok.length)]
     }
 
-    fn tok_is(&self, s: &str) -> bool {
+    fn peek_is(&self, s: &str) -> bool {
         self.tok_source(self.peek()).eq(s.as_bytes())
     }
 
+    fn la_is(&self, n: usize, s: &str) -> bool {
+        self.tok_source(self.la(n)).eq(s.as_bytes())
+    }
+
     fn skip(&mut self, s: &str) -> &Token {
-        if !self.tok_is(s) {
+        if !self.peek_is(s) {
             self.error_tok(self.peek(), &format!("Expected {}", s));
         }
         self.advance()

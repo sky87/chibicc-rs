@@ -1,6 +1,10 @@
 use crate::errors::ErrorReporting;
 use crate::parser::{TopLevelNode, TopLevelKind, StmtNode, StmtKind, ExprNode, ExprKind};
 
+const ARG_REGS: [&str;6] = [
+    "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"
+];
+
 fn update_stack_info(node: &mut TopLevelNode) {
     match node.kind {
         TopLevelKind::SourceUnit(ref mut locals, _, ref mut stack_size) => {
@@ -130,7 +134,15 @@ impl<'a> Codegen<'a> {
                 self.addr(node);
                 println!("  mov (%rax), %rax");
             }
-            ExprKind::Funcall(ref name) => {
+            ExprKind::Funcall(ref name, ref args) => {
+                for arg in args {
+                    self.expr(arg);
+                    self.push();
+                }
+                for i in (0..args.len()).rev() {
+                    self.pop(ARG_REGS[i]);
+                }
+
                 println!("  mov $0, %rax");
                 println!("  call {}", String::from_utf8_lossy(name));
             }
