@@ -12,24 +12,25 @@ pub type AsciiStr = Vec<u8>;
 pub enum Ty {
     Int,
     Ptr(P<Ty>),
+    Fn(P<Ty>),
     Unit
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node<Kind> {
     pub kind: Kind,
     pub offset: usize,
     pub ty: Ty
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VarData {
     pub name: AsciiStr,
     pub ty: Ty,
     pub stack_offset: i64
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ExprKind {
     Num(i64),
     Var(SP<VarData>),
@@ -53,7 +54,7 @@ pub enum ExprKind {
     Assign(P<ExprNode>, P<ExprNode>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StmtKind {
     Expr(ExprNode),
     Return(ExprNode),
@@ -62,14 +63,15 @@ pub enum StmtKind {
     For(Option<P<StmtNode>>, Option<P<ExprNode>>, Option<P<ExprNode>>, P<StmtNode>)
 }
 
-#[derive(Debug)]
-pub enum TopLevelKind {
-    SourceUnit(Vec<SP<VarData>>, Vec<StmtNode>, i64)
+#[derive(Debug, Clone)]
+pub enum DeclKind {
+    Function(AsciiStr, Vec<SP<VarData>>, StmtNode, i64)
 }
 
 pub type ExprNode = Node<ExprKind>;
 pub type StmtNode = Node<StmtKind>;
-pub type TopLevelNode<'a> = Node<TopLevelKind>;
+pub type DeclNode = Node<DeclKind>;
+pub type SourceUnit = Vec<DeclNode>;
 
 pub struct Parser<'a> {
     src: &'a [u8],
@@ -96,14 +98,27 @@ impl<'a> Parser<'a> {
     }
 
     // source_unit = stmt+
-    pub fn source_unit(&mut self) -> TopLevelNode {
-        let mut stmts = Vec::new();
-        let offset = self.peek().offset;
-        stmts.push(self.compound_stmt());
+    pub fn source_unit(&mut self) -> SourceUnit {
+        let mut fns = Vec::new();
+        loop {
+            match self.peek().kind {
+                TokenKind::Eof => break,
+                _ => fns.push(self.function()),
+            }
+        }
+        fns
+    }
 
+    pub fn function(&mut self) -> DeclNode {
+        let offset = self.peek().offset;
+        let ty = self.declspec();
+        let (ty, name) = self.declarator(&ty);
+
+        self.vars.clear();
+        let body = self.compound_stmt();
         // Reverse them to keep the locals layout in line with chibicc
         let locals = self.vars.clone().into_iter().rev().collect();
-        TopLevelNode { kind: TopLevelKind::SourceUnit(locals, stmts, -1), offset, ty: Ty::Unit }
+        DeclNode { kind: DeclKind::Function(name, locals, body, -1), offset, ty }
     }
 
     // stmt = "return" expr ";"
@@ -230,7 +245,7 @@ impl<'a> Parser<'a> {
         Ty::Int
     }
 
-    // declarator = "*"* ident
+    // declarator = "*"* ident type-suffix
     fn declarator(&mut self, base_ty: &Ty) -> (Ty, AsciiStr) {
         let mut ty = base_ty.clone();
         while self.peek_is("*") {
@@ -242,10 +257,20 @@ impl<'a> Parser<'a> {
             TokenKind::Ident => {
                 let name = self.tok_source(self.peek()).to_owned();
                 self.advance();
-                (ty, name)
+                (self.type_suffix(ty), name)
             },
             _ => self.error_tok(self.peek(), "expected a variable name")
         }
+    }
+
+    // type-suffix = ("(" func-params)?
+    fn type_suffix(&mut self, ty: Ty) -> Ty {
+        if self.peek_is("(") {
+            self.advance();
+            self.skip(")");
+            return Ty::Fn(P::new(ty));
+        }
+        return ty;
     }
 
     // expr-stmt = expr? ";"
