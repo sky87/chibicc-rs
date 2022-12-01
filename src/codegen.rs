@@ -1,13 +1,17 @@
 use crate::errors::ErrorReporting;
-use crate::parser::{DeclNode, DeclKind, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit};
+use crate::parser::{TopDeclNode, TopDeclKind, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit};
 
 const ARG_REGS: [&str;6] = [
     "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"
 ];
 
-fn update_stack_info(node: &mut DeclNode) {
+fn update_stack_info(node: &mut TopDeclNode) {
     match node.kind {
-        DeclKind::Function(_, ref mut locals, _, ref mut stack_size) => {
+        TopDeclKind::Function {
+            ref locals,
+            ref mut stack_size,
+            ..
+        } => {
             let mut offset = 0;
             for local in locals {
                 offset -= 8;
@@ -24,7 +28,7 @@ pub struct Codegen<'a> {
     su: SourceUnit,
     depth: i64,
     id_count: usize,
-    cur_fn: Option<DeclNode>,
+    cur_fn: Option<TopDeclNode>,
 }
 
 impl<'a> ErrorReporting for Codegen<'a> {
@@ -50,13 +54,22 @@ impl<'a> Codegen<'a> {
         // maybe by splitting the state up?
         for decl in &self.su.clone() {
             match decl.kind {
-                DeclKind::Function(ref name, ref locals, ref body, stack_size) => {
+                TopDeclKind::Function {
+                    ref name,
+                    ref params,
+                    ref locals,
+                    ref body,
+                    stack_size
+                } => {
                     self.cur_fn = Some(decl.clone());
                     let name = String::from_utf8_lossy(name);
 
+                    println!();
                     println!("  .globl {}", name);
                     for local in locals {
-                        let local = local.borrow();
+                        // just borrow doesn't work anymore, god knows why...
+                        // at some point I need to study how Rc and RefCell actually work...
+                        let local = local.borrow_mut();
                         println!("# var {} offset {}", String::from_utf8_lossy(&local.name), local.stack_offset);
                     }
                     println!("{}:", name);
@@ -67,13 +80,20 @@ impl<'a> Codegen<'a> {
                     println!("  sub ${}, %rsp", stack_size);
                     println!();
 
+                    for (i, param) in params.iter().enumerate() {
+                        let param = param.borrow_mut();
+                        println!("  mov {}, {}(%rbp)", ARG_REGS[i], param.stack_offset);
+                    }
+
                     self.stmt(body);
+                    self.sanity_checks();
 
                     println!();
                     println!(".L.return.{}:", name);
                     println!("  mov %rbp, %rsp");
                     println!("  pop %rbp");
                     println!("  ret");
+                    println!();
                 }
             }
         }
@@ -84,7 +104,7 @@ impl<'a> Codegen<'a> {
             StmtKind::Expr(ref expr) => self.expr(expr),
             StmtKind::Return(ref expr) => {
                 self.expr(expr);
-                let DeclKind::Function(ref name, _, _, _) = &self.cur_fn.as_ref().unwrap().kind;
+                let TopDeclKind::Function { ref name, .. } = &self.cur_fn.as_ref().unwrap().kind;
                 println!("  jmp .L.return.{}", String::from_utf8_lossy(name));
             },
             StmtKind::Block(ref stmts) => {
@@ -244,7 +264,7 @@ impl<'a> Codegen<'a> {
     fn addr(&mut self, expr: &ExprNode) {
         match expr.kind {
             ExprKind::Var(ref data) => {
-                println!("  lea {}(%rbp), %rax", &data.borrow().stack_offset);
+                println!("  lea {}(%rbp), %rax", &data.borrow_mut().stack_offset);
             },
             ExprKind::Deref(ref expr) => {
                 self.expr(expr);

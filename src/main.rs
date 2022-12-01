@@ -29,5 +29,4 @@ fn main() {
 
     let mut codegen = Codegen::new(src, su);
     codegen.program();
-    codegen.sanity_checks();
 }

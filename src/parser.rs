@@ -12,7 +12,7 @@ pub type AsciiStr = Vec<u8>;
 pub enum Ty {
     Int,
     Ptr(P<Ty>),
-    Fn(P<Ty>),
+    Fn(P<Ty>, Vec<P<Ty>>),
     Unit
 }
 
@@ -64,14 +64,20 @@ pub enum StmtKind {
 }
 
 #[derive(Debug, Clone)]
-pub enum DeclKind {
-    Function(AsciiStr, Vec<SP<VarData>>, StmtNode, i64)
+pub enum TopDeclKind {
+    Function {
+        name: AsciiStr,
+        params: Vec<SP<VarData>>,
+        locals: Vec<SP<VarData>>,
+        body: StmtNode,
+        stack_size: i64
+    }
 }
 
 pub type ExprNode = Node<ExprKind>;
 pub type StmtNode = Node<StmtKind>;
-pub type DeclNode = Node<DeclKind>;
-pub type SourceUnit = Vec<DeclNode>;
+pub type TopDeclNode = Node<TopDeclKind>;
+pub type SourceUnit = Vec<TopDeclNode>;
 
 pub struct Parser<'a> {
     src: &'a [u8],
@@ -109,16 +115,25 @@ impl<'a> Parser<'a> {
         fns
     }
 
-    pub fn function(&mut self) -> DeclNode {
+    pub fn function(&mut self) -> TopDeclNode {
+        self.vars.clear();
+
         let offset = self.peek().offset;
         let ty = self.declspec();
         let (ty, name) = self.declarator(&ty);
 
-        self.vars.clear();
+        let params = self.vars.clone();
+
         let body = self.compound_stmt();
         // Reverse them to keep the locals layout in line with chibicc
-        let locals = self.vars.clone().into_iter().rev().collect();
-        DeclNode { kind: DeclKind::Function(name, locals, body, -1), offset, ty }
+        let locals: Vec<SP<VarData>> = self.vars.clone().into_iter().rev().collect();
+        TopDeclNode { kind: TopDeclKind::Function {
+            name,
+            params,
+            locals,
+            body,
+            stack_size: -1
+        }, offset, ty }
     }
 
     // stmt = "return" expr ";"
@@ -266,9 +281,21 @@ impl<'a> Parser<'a> {
     // type-suffix = ("(" func-params)?
     fn type_suffix(&mut self, ty: Ty) -> Ty {
         if self.peek_is("(") {
+            let mut params = Vec::new();
             self.advance();
+            while !self.peek_is(")") {
+                if params.len() > 0 {
+                    self.skip(",");
+                }
+                let base_ty = self.declspec();
+                let (ty, name) = self.declarator(&base_ty);
+                params.push(P::new(ty.clone()));
+                self.vars.push(
+                    Rc::new(RefCell::new(VarData { name, ty, stack_offset: -1 }))
+                );
+            }
             self.skip(")");
-            return Ty::Fn(P::new(ty));
+            return Ty::Fn(P::new(ty), params);
         }
         return ty;
     }
