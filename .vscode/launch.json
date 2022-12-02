@@ -10,7 +10,7 @@
       "request": "launch",
       "program": "${workspaceRoot}/target/debug/chibicc-rs",
       "args": [
-        "int main() { return sub2(4,3); } int sub2(int x, int y) { return x-y; }"
+        "int main() { int x[2]; int *y=&x; *y=3; return *x; }"
       ],
       "stopAtEntry": false,
       "cwd": "${fileDirname}",

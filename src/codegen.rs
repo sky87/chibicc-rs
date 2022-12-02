@@ -1,5 +1,5 @@
 use crate::errors::ErrorReporting;
-use crate::parser::{TopDeclNode, TopDeclKind, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit};
+use crate::parser::{TopDeclNode, TopDeclKind, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty};
 
 const ARG_REGS: [&str;6] = [
     "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"
@@ -12,10 +12,11 @@ fn update_stack_info(node: &mut TopDeclNode) {
             ref mut stack_size,
             ..
         } => {
-            let mut offset = 0;
+            let mut offset: i64 = 0;
             for local in locals {
-                offset -= 8;
                 let mut local = local.borrow_mut();
+                let ty_size: i64 = local.ty.size.try_into().unwrap();
+                offset -= ty_size;
                 local.stack_offset = offset;
             }
             *stack_size = align_to(-offset, 16);
@@ -146,16 +147,6 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn push(&mut self) {
-        println!("  push %rax");
-        self.depth += 1;
-    }
-
-    fn pop(&mut self, arg: &str) {
-        println!("  pop {}", arg);
-        self.depth -= 1;
-    }
-
     fn expr(&mut self, node: &ExprNode) {
         match node.kind {
             ExprKind::Num(val) => println!("  mov ${}, %rax", val),
@@ -165,7 +156,7 @@ impl<'a> Codegen<'a> {
             }
             ExprKind::Var(_) => {
                 self.addr(node);
-                println!("  mov (%rax), %rax");
+                self.load(&node.ty);
             }
             ExprKind::Funcall(ref name, ref args) => {
                 for arg in args {
@@ -175,7 +166,6 @@ impl<'a> Codegen<'a> {
                 for i in (0..args.len()).rev() {
                     self.pop(ARG_REGS[i]);
                 }
-
                 println!("  mov $0, %rax");
                 println!("  call {}", String::from_utf8_lossy(name));
             }
@@ -184,14 +174,13 @@ impl<'a> Codegen<'a> {
             }
             ExprKind::Deref(ref expr) => {
                 self.expr(expr);
-                println!("  mov (%rax), %rax");
+                self.load(&node.ty);
             }
             ExprKind::Assign(ref lhs, ref rhs) => {
                 self.addr(lhs);
                 self.push();
                 self.expr(rhs);
-                self.pop("%rdi");
-                println!("  mov %rax, (%rdi)");
+                self.store();
             }
             ExprKind::Add(ref lhs, ref rhs) => {
                 self.expr(rhs.as_ref());
@@ -259,6 +248,29 @@ impl<'a> Codegen<'a> {
                 println!("  movzb %al, %rax");
             }
         };
+    }
+
+    fn load(&self, ty: &Ty) {
+        // println!("LOAD {:?}", ty);
+        if let TyKind::Array(_, _) = ty.kind {
+            return;
+        }
+        println!("  mov (%rax), %rax");
+    }
+
+    fn store(&mut self) {
+        self.pop("%rdi");
+        println!("  mov %rax, (%rdi)");
+    }
+
+    fn push(&mut self) {
+        println!("  push %rax");
+        self.depth += 1;
+    }
+
+    fn pop(&mut self, arg: &str) {
+        println!("  pop {}", arg);
+        self.depth -= 1;
     }
 
     fn addr(&mut self, expr: &ExprNode) {
