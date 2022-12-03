@@ -148,9 +148,9 @@ impl<'a> Codegen<'a> {
     }
 
     fn expr(&mut self, node: &ExprNode) {
-        match node.kind {
+        match &node.kind {
             ExprKind::Num(val) => println!("  mov ${}, %rax", val),
-            ExprKind::Neg(ref expr) => {
+            ExprKind::Neg(expr) => {
                 self.expr(expr);
                 println!("  neg %rax");
             }
@@ -158,7 +158,7 @@ impl<'a> Codegen<'a> {
                 self.addr(node);
                 self.load(&node.ty);
             }
-            ExprKind::Funcall(ref name, ref args) => {
+            ExprKind::Funcall(name, args) => {
                 for arg in args {
                     self.expr(arg);
                     self.push();
@@ -169,41 +169,41 @@ impl<'a> Codegen<'a> {
                 println!("  mov $0, %rax");
                 println!("  call {}", String::from_utf8_lossy(name));
             }
-            ExprKind::Addr(ref expr) => {
+            ExprKind::Addr(expr) => {
                 self.addr(expr);
             }
-            ExprKind::Deref(ref expr) => {
+            ExprKind::Deref(expr) => {
                 self.expr(expr);
                 self.load(&node.ty);
             }
-            ExprKind::Assign(ref lhs, ref rhs) => {
+            ExprKind::Assign(lhs, rhs) => {
                 self.addr(lhs);
                 self.push();
                 self.expr(rhs);
                 self.store();
             }
-            ExprKind::Add(ref lhs, ref rhs) => {
+            ExprKind::Add(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
                 println!("  add %rdi, %rax");
             }
-            ExprKind::Sub(ref lhs, ref rhs) => {
+            ExprKind::Sub(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
                 println!("  sub %rdi, %rax");
             }
-            ExprKind::Mul(ref lhs, ref rhs) => {
+            ExprKind::Mul(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
                 println!("  imul %rdi, %rax");
             }
-            ExprKind::Div(ref lhs, ref rhs) => {
+            ExprKind::Div(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
@@ -211,7 +211,7 @@ impl<'a> Codegen<'a> {
                 println!("  cqo");
                 println!("  idiv %rdi, %rax");
             }
-            ExprKind::Eq(ref lhs, ref rhs) => {
+            ExprKind::Eq(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
@@ -220,7 +220,7 @@ impl<'a> Codegen<'a> {
                 println!("  sete %al");
                 println!("  movzb %al, %rax");
             }
-            ExprKind::Ne(ref lhs, ref rhs) => {
+            ExprKind::Ne(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
@@ -229,7 +229,7 @@ impl<'a> Codegen<'a> {
                 println!("  setne %al");
                 println!("  movzb %al, %rax");
             }
-            ExprKind::Le(ref lhs, ref rhs) => {
+            ExprKind::Le(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
@@ -238,7 +238,7 @@ impl<'a> Codegen<'a> {
                 println!("  setle %al");
                 println!("  movzb %al, %rax");
             }
-            ExprKind::Lt(ref lhs, ref rhs) => {
+            ExprKind::Lt(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
@@ -274,11 +274,11 @@ impl<'a> Codegen<'a> {
     }
 
     fn addr(&mut self, expr: &ExprNode) {
-        match expr.kind {
-            ExprKind::Var(ref data) => {
+        match &expr.kind {
+            ExprKind::Var(data) => {
                 println!("  lea {}(%rbp), %rax", &data.borrow_mut().stack_offset);
             },
-            ExprKind::Deref(ref expr) => {
+            ExprKind::Deref(expr) => {
                 self.expr(expr);
             }
             _ => self.error_at(expr.offset, "not an lvalue"),
