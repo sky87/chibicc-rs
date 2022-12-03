@@ -301,7 +301,7 @@ impl<'a> Parser<'a> {
     }
 
     // type-suffix = "(" func-params
-    //             | "[" num "]"
+    //             | "[" num "]" type-suffix
     //             | ε
     fn type_suffix(&mut self, ty: Ty) -> Ty {
         if self.peek_is("(") {
@@ -312,6 +312,7 @@ impl<'a> Parser<'a> {
             self.advance();
             let len = self.get_number();
             self.skip("]");
+            let ty = self.type_suffix(ty);
             return Ty::array(P::new(ty), len.try_into().unwrap());
         }
         return ty;
@@ -487,10 +488,10 @@ impl<'a> Parser<'a> {
             (TyKind::Int, TyKind::Int) => {
                 ExprNode { kind: ExprKind::Add(lhs, rhs), offset, ty: Ty::int() }
             },
-            (TyKind::Ptr(_), TyKind::Int) | (TyKind::Array(_, _), TyKind::Int) => {
+            (TyKind::Ptr(bt), TyKind::Int) | (TyKind::Array(bt, _), TyKind::Int) => {
                 let rhs = P::new(ExprNode {
                     kind: ExprKind::Mul(
-                        P::new(ExprNode { kind: ExprKind::Num(8), offset, ty: Ty::int() }),
+                        synth_num(bt.size.try_into().unwrap(), offset),
                         rhs
                     ),
                     offset,
@@ -508,10 +509,10 @@ impl<'a> Parser<'a> {
             (TyKind::Int, TyKind::Int) => {
                 ExprNode { kind: ExprKind::Sub(lhs, rhs), offset, ty: Ty::int() }
             },
-            (TyKind::Ptr(_), TyKind::Int) | (TyKind::Array(_, _), TyKind::Int) => {
+            (TyKind::Ptr(bt), TyKind::Int) | (TyKind::Array(bt, _), TyKind::Int) => {
                 let rhs = P::new(ExprNode {
                     kind: ExprKind::Mul(
-                        synth_num(8, offset),
+                        synth_num(bt.size.try_into().unwrap(), offset),
                         rhs
                     ),
                     offset,
@@ -521,10 +522,11 @@ impl<'a> Parser<'a> {
                 ExprNode { kind: ExprKind::Sub(lhs, rhs), offset, ty }
             },
             // TODO better way than combinatorial explosion?
-            (TyKind::Ptr(_), TyKind::Ptr(_)) | (TyKind::Array(_, _), TyKind::Ptr(_)) |
-            (TyKind::Ptr(_), TyKind::Array(_, _)) | (TyKind::Array(_, _), TyKind::Array(_,_)) => {
+            (TyKind::Ptr(bt), TyKind::Ptr(_)) | (TyKind::Array(bt, _), TyKind::Ptr(_)) |
+            (TyKind::Ptr(bt), TyKind::Array(_, _)) | (TyKind::Array(bt, _), TyKind::Array(_,_)) => {
+                let size: i64 = bt.size.try_into().unwrap();
                 let node = P::new(ExprNode { kind: ExprKind::Sub(lhs, rhs), offset, ty: Ty::int() });
-                ExprNode { kind: ExprKind::Div(node, synth_num(8, offset)), offset, ty: Ty::int() }
+                ExprNode { kind: ExprKind::Div(node, synth_num(size, offset)), offset, ty: Ty::int() }
             }
             _ => self.error_at(offset, "invalid operands")
         }
