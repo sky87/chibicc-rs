@@ -281,7 +281,7 @@ impl<'a> Codegen<'a> {
             ExprKind::Deref(expr) => {
                 self.expr(expr);
             }
-            _ => self.error_at(expr.offset, "not an lvalue"),
+            _ => self.error_at(expr.offset, "not an lvalue")
         };
     }
 

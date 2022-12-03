@@ -363,9 +363,6 @@ impl<'a> Parser<'a> {
             let offset = self.advance().offset;
             let rhs = P::new(self.assign());
             let ty = node.ty.clone();
-            if let TyKind::Array(_, _) = ty.kind {
-                self.error_at(node.offset, "not an lvalue");
-            }
             node = ExprNode {
                 kind: ExprKind::Assign(P::new(node), rhs),
                 offset,
@@ -477,7 +474,7 @@ impl<'a> Parser<'a> {
         let mut rhs = rhs;
 
         if let TyKind::Int = lhs.ty.kind {
-            if let TyKind::Ptr(_) = rhs.ty.kind {
+            if let TyKind::Ptr(_) | TyKind::Array(_, _) = rhs.ty.kind {
                 let tmp = lhs;
                 lhs = rhs;
                 rhs = tmp;
@@ -486,19 +483,11 @@ impl<'a> Parser<'a> {
 
         match (&lhs.ty.kind, &rhs.ty.kind) {
             (TyKind::Int, TyKind::Int) => {
-                ExprNode { kind: ExprKind::Add(lhs, rhs), offset, ty: Ty::int() }
+                synth_add(lhs, rhs, offset)
             },
             (TyKind::Ptr(bt), TyKind::Int) | (TyKind::Array(bt, _), TyKind::Int) => {
-                let rhs = P::new(ExprNode {
-                    kind: ExprKind::Mul(
-                        synth_num(bt.size.try_into().unwrap(), offset),
-                        rhs
-                    ),
-                    offset,
-                    ty: Ty::int(),
-                });
-                let ty = lhs.ty.clone();
-                ExprNode { kind: ExprKind::Add(lhs, rhs), offset, ty }
+                let rhs = synth_mul(synth_num(bt.size.try_into().unwrap(), offset), rhs, offset);
+                synth_add(lhs, P::new(rhs), offset)
             },
             _ => self.error_at(offset, "invalid operands")
         }
@@ -507,26 +496,19 @@ impl<'a> Parser<'a> {
     fn sub_overload(&self, lhs: P<ExprNode>, rhs: P<ExprNode>, offset: usize) -> ExprNode {
         match (&lhs.ty.kind, &rhs.ty.kind) {
             (TyKind::Int, TyKind::Int) => {
-                ExprNode { kind: ExprKind::Sub(lhs, rhs), offset, ty: Ty::int() }
+                synth_sub(lhs, rhs, offset)
             },
             (TyKind::Ptr(bt), TyKind::Int) | (TyKind::Array(bt, _), TyKind::Int) => {
-                let rhs = P::new(ExprNode {
-                    kind: ExprKind::Mul(
-                        synth_num(bt.size.try_into().unwrap(), offset),
-                        rhs
-                    ),
-                    offset,
-                    ty: Ty::int(),
-                });
-                let ty = lhs.ty.clone();
-                ExprNode { kind: ExprKind::Sub(lhs, rhs), offset, ty }
+                let rhs = synth_mul(synth_num(bt.size.try_into().unwrap(), offset), rhs, offset);
+                synth_sub(lhs, P::new(rhs), offset)
             },
             // TODO better way than combinatorial explosion?
             (TyKind::Ptr(bt), TyKind::Ptr(_)) | (TyKind::Array(bt, _), TyKind::Ptr(_)) |
             (TyKind::Ptr(bt), TyKind::Array(_, _)) | (TyKind::Array(bt, _), TyKind::Array(_,_)) => {
                 let size: i64 = bt.size.try_into().unwrap();
-                let node = P::new(ExprNode { kind: ExprKind::Sub(lhs, rhs), offset, ty: Ty::int() });
-                ExprNode { kind: ExprKind::Div(node, synth_num(size, offset)), offset, ty: Ty::int() }
+                let mut sub = synth_sub(lhs, rhs, offset);
+                sub.ty = Ty::int();
+                synth_div(P::new(sub), synth_num(size, offset), offset)
             }
             _ => self.error_at(offset, "invalid operands")
         }
@@ -564,7 +546,7 @@ impl<'a> Parser<'a> {
     }
 
     // unary = ("+" | "-" | "*" | "&") unary
-    //       | primary
+    //       | postfix
     fn unary(&mut self) -> ExprNode {
         if self.peek_is("+") {
             self.advance();
@@ -602,7 +584,20 @@ impl<'a> Parser<'a> {
             return ExprNode { kind: ExprKind::Deref(node), offset, ty }
         }
 
-        self.primary()
+        self.postfix()
+    }
+
+    // postfix = "primary" ("[" expr "]")*
+    fn postfix(&mut self) -> ExprNode {
+        let mut node = self.primary();
+        while self.peek_is("[") {
+            let offset = self.advance().offset;
+            let idx = self.expr();
+            self.skip("]");
+            let expr = self.add_overload(P::new(node), P::new(idx), offset);
+            node = self.synth_deref(P::new(expr), offset);
+        }
+        node
     }
 
     // primary = "(" expr ")" | funcall | num
@@ -718,8 +713,45 @@ impl<'a> Parser<'a> {
             self.error_tok(self.peek(), "extra token")
         }
     }
+
+    fn synth_deref(&self, expr: P<ExprNode>, offset: usize) -> ExprNode {
+        let base_ty = get_base_ty(&expr.ty);
+        let ty = match base_ty {
+            None => self.error_at(offset, "invalid pointer dereference"),
+            Some(base_ty) => base_ty.clone()
+        };
+        ExprNode { kind: ExprKind::Deref(expr), offset, ty }
+    }
 }
 
 fn synth_num(v: i64, offset: usize) -> P<ExprNode> {
     P::new(ExprNode { kind: ExprKind::Num(v), offset, ty: Ty::int() })
+}
+
+fn synth_add(lhs: P<ExprNode>, rhs: P<ExprNode>, offset: usize) -> ExprNode {
+    let ty = lhs.ty.clone();
+    ExprNode { kind: ExprKind::Add(lhs, rhs), offset, ty }
+}
+
+fn synth_mul(lhs: P<ExprNode>, rhs: P<ExprNode>, offset: usize) -> ExprNode {
+    let ty = lhs.ty.clone();
+    ExprNode { kind: ExprKind::Mul(lhs, rhs), offset, ty }
+}
+
+fn synth_sub(lhs: P<ExprNode>, rhs: P<ExprNode>, offset: usize) -> ExprNode {
+    let ty = lhs.ty.clone();
+    ExprNode { kind: ExprKind::Sub(lhs, rhs), offset, ty }
+}
+
+fn synth_div(lhs: P<ExprNode>, rhs: P<ExprNode>, offset: usize) -> ExprNode {
+    let ty = lhs.ty.clone();
+    ExprNode { kind: ExprKind::Div(lhs, rhs), offset, ty }
+}
+
+fn get_base_ty(ty: &Ty) -> Option<&Ty> {
+    match &ty.kind {
+        TyKind::Ptr(bt) => Some(bt),
+        TyKind::Array(bt, _) => Some(bt),
+        _ => None
+    }
 }
