@@ -486,7 +486,8 @@ impl<'a> Parser<'a> {
                 synth_add(lhs, rhs, offset)
             },
             (TyKind::Ptr(bt), TyKind::Int) | (TyKind::Array(bt, _), TyKind::Int) => {
-                let rhs = synth_mul(synth_num(bt.size.try_into().unwrap(), offset), rhs, offset);
+                let size = P::new(synth_num(bt.size.try_into().unwrap(), offset));
+                let rhs = synth_mul(size, rhs, offset);
                 synth_add(lhs, P::new(rhs), offset)
             },
             _ => self.error_at(offset, "invalid operands")
@@ -499,7 +500,8 @@ impl<'a> Parser<'a> {
                 synth_sub(lhs, rhs, offset)
             },
             (TyKind::Ptr(bt), TyKind::Int) | (TyKind::Array(bt, _), TyKind::Int) => {
-                let rhs = synth_mul(synth_num(bt.size.try_into().unwrap(), offset), rhs, offset);
+                let size = P::new(synth_num(bt.size.try_into().unwrap(), offset));
+                let rhs = synth_mul(size, rhs, offset);
                 synth_sub(lhs, P::new(rhs), offset)
             },
             // TODO better way than combinatorial explosion?
@@ -508,7 +510,7 @@ impl<'a> Parser<'a> {
                 let size: i64 = bt.size.try_into().unwrap();
                 let mut sub = synth_sub(lhs, rhs, offset);
                 sub.ty = Ty::int();
-                synth_div(P::new(sub), synth_num(size, offset), offset)
+                synth_div(P::new(sub), P::new(synth_num(size, offset)), offset)
             }
             _ => self.error_at(offset, "invalid operands")
         }
@@ -600,12 +602,19 @@ impl<'a> Parser<'a> {
         node
     }
 
-    // primary = "(" expr ")" | funcall | num
+    // primary = "(" expr ")" | "sizeof" unary | funcall | num
     fn primary(&mut self) -> ExprNode {
         match self.peek().kind {
             TokenKind::Num(val) => {
                 let offset = self.advance().offset;
                 return ExprNode { kind: ExprKind::Num(val), offset, ty: Ty::int() }
+            },
+            TokenKind::Keyword => {
+                if self.peek_is("sizeof") {
+                    self.advance();
+                    let node = self.unary();
+                    return synth_num(node.ty.size.try_into().unwrap(), node.offset);
+                }
             }
             TokenKind::Ident => {
                 if self.la_is(1, "(") {
@@ -724,8 +733,8 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn synth_num(v: i64, offset: usize) -> P<ExprNode> {
-    P::new(ExprNode { kind: ExprKind::Num(v), offset, ty: Ty::int() })
+fn synth_num(v: i64, offset: usize) -> ExprNode {
+    ExprNode { kind: ExprKind::Num(v), offset, ty: Ty::int() }
 }
 
 fn synth_add(lhs: P<ExprNode>, rhs: P<ExprNode>, offset: usize) -> ExprNode {

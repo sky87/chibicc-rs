@@ -24,6 +24,7 @@ lazy_static! {
             "return",
             "if", "else",
             "for", "while",
+            "sizeof",
             "int"
         ].map(|k| k.as_bytes()).into()
     };
