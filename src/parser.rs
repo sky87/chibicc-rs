@@ -35,21 +35,21 @@ impl Ty {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Node<Kind> {
     pub kind: Kind,
     pub offset: usize,
     pub ty: Rc<Ty>
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct VarData {
     pub name: AsciiStr,
     pub ty: Rc<Ty>,
     pub stack_offset: i64
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ExprKind {
     Num(i64),
     Var(SP<VarData>),
@@ -73,7 +73,7 @@ pub enum ExprKind {
     Assign(P<ExprNode>, P<ExprNode>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum StmtKind {
     Expr(ExprNode),
     Return(ExprNode),
@@ -88,7 +88,7 @@ pub enum TopDeclKind {
         name: AsciiStr,
         params: Vec<SP<VarData>>,
         locals: Vec<SP<VarData>>,
-        body: StmtNode,
+        body: SP<StmtNode>,
         stack_size: i64
     }
 }
@@ -96,7 +96,7 @@ pub enum TopDeclKind {
 pub type ExprNode = Node<ExprKind>;
 pub type StmtNode = Node<StmtKind>;
 pub type TopDeclNode = Node<TopDeclKind>;
-pub type SourceUnit = Vec<TopDeclNode>;
+pub type SourceUnit = Vec<SP<TopDeclNode>>;
 
 pub struct Parser<'a> {
     src: &'a [u8],
@@ -128,7 +128,7 @@ impl<'a> Parser<'a> {
         loop {
             match self.peek().kind {
                 TokenKind::Eof => break,
-                _ => fns.push(self.function()),
+                _ => fns.push(Rc::new(RefCell::new(self.function()))),
             }
         }
         fns
@@ -150,7 +150,7 @@ impl<'a> Parser<'a> {
             name,
             params,
             locals,
-            body,
+            body: Rc::new(RefCell::new(body)),
             stack_size: -1
         }, offset, ty }
     }

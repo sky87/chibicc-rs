@@ -1,5 +1,5 @@
 use crate::errors::ErrorReporting;
-use crate::parser::{TopDeclNode, TopDeclKind, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty};
+use crate::parser::{TopDeclNode, TopDeclKind, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty, SP};
 
 const ARG_REGS: [&str;6] = [
     "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"
@@ -29,7 +29,7 @@ pub struct Codegen<'a> {
     su: SourceUnit,
     depth: i64,
     id_count: usize,
-    cur_fn: Option<TopDeclNode>,
+    cur_fn: Option<SP<TopDeclNode>>,
 }
 
 impl<'a> ErrorReporting for Codegen<'a> {
@@ -37,9 +37,9 @@ impl<'a> ErrorReporting for Codegen<'a> {
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(src: &'a [u8], mut su: SourceUnit) -> Self {
-        for decl in &mut su {
-            update_stack_info(decl);
+    pub fn new(src: &'a [u8], su: SourceUnit) -> Self {
+        for decl in &su {
+            update_stack_info(&mut decl.borrow_mut());
         }
         Self {
             src,
@@ -51,10 +51,10 @@ impl<'a> Codegen<'a> {
     }
 
     pub fn program(&mut self) {
-        // All the cloning sucks, but it will work until I figure out how to please the borrow checker...
-        // maybe by splitting the state up?
-        for decl in &self.su.clone() {
-            match decl.kind {
+        // This still sucks... just less than before
+        for i in 0..self.su.len() {
+            let decl = self.su[i].clone();
+            match decl.borrow().kind {
                 TopDeclKind::Function {
                     ref name,
                     ref params,
@@ -86,7 +86,7 @@ impl<'a> Codegen<'a> {
                         println!("  mov {}, {}(%rbp)", ARG_REGS[i], param.stack_offset);
                     }
 
-                    self.stmt(body);
+                    self.stmt(&body.borrow());
                     self.sanity_checks();
 
                     println!();
@@ -96,7 +96,7 @@ impl<'a> Codegen<'a> {
                     println!("  ret");
                     println!();
                 }
-            }
+            };
         }
     }
 
@@ -105,7 +105,7 @@ impl<'a> Codegen<'a> {
             StmtKind::Expr(ref expr) => self.expr(expr),
             StmtKind::Return(ref expr) => {
                 self.expr(expr);
-                let TopDeclKind::Function { ref name, .. } = &self.cur_fn.as_ref().unwrap().kind;
+                let TopDeclKind::Function { ref name, .. } = &self.cur_fn.as_ref().unwrap().borrow().kind;
                 println!("  jmp .L.return.{}", String::from_utf8_lossy(name));
             },
             StmtKind::Block(ref stmts) => {
