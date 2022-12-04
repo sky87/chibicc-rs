@@ -8,29 +8,29 @@ pub type P<A> = Box<A>;
 pub type SP<A> = Rc<RefCell<A>>;
 pub type AsciiStr = Vec<u8>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum TyKind {
     Int,
-    Ptr(P<Ty>),
-    Fn(P<Ty>, Vec<P<Ty>>),
-    Array(P<Ty>, usize),
+    Ptr(Rc<Ty>),
+    Fn(Rc<Ty>, Vec<Rc<Ty>>),
+    Array(Rc<Ty>, usize),
     Unit
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Ty {
     pub kind: TyKind,
     pub size: usize
 }
 
 impl Ty {
-    fn int() -> Ty { Ty { kind: TyKind::Int, size: 8 } }
-    fn unit() -> Ty { Ty { kind: TyKind::Unit, size: 0 } }
-    fn ptr(base: P<Ty>) -> Ty { Ty { kind: TyKind::Ptr(base), size: 8 } }
-    fn func(ret: P<Ty>, params: Vec<P<Ty>>) -> Ty { Ty { kind: TyKind::Fn(ret, params), size: 0 } }
-    fn array(base: P<Ty>, len: usize) -> Ty {
+    fn int() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Int, size: 8 }) }
+    fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 0 }) }
+    fn ptr(base: Rc<Ty>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Ptr(base), size: 8 }) }
+    fn func(ret: Rc<Ty>, params: Vec<Rc<Ty>>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Fn(ret, params), size: 0 }) }
+    fn array(base: Rc<Ty>, len: usize) -> Rc<Ty> {
         let base_size = base.size;
-        Ty { kind: TyKind::Array(base, len), size: base_size*len }
+        Rc::new(Ty { kind: TyKind::Array(base, len), size: base_size*len })
     }
 }
 
@@ -39,13 +39,13 @@ impl Ty {
 pub struct Node<Kind> {
     pub kind: Kind,
     pub offset: usize,
-    pub ty: Ty
+    pub ty: Rc<Ty>
 }
 
 #[derive(Debug, Clone)]
 pub struct VarData {
     pub name: AsciiStr,
-    pub ty: Ty,
+    pub ty: Rc<Ty>,
     pub stack_offset: i64
 }
 
@@ -139,7 +139,7 @@ impl<'a> Parser<'a> {
 
         let offset = self.peek().offset;
         let ty = self.declspec();
-        let (ty, name) = self.declarator(&ty);
+        let (ty, name) = self.declarator(ty);
 
         let params = self.vars.clone();
 
@@ -249,7 +249,7 @@ impl<'a> Parser<'a> {
             count += 1;
 
             let offset = self.peek().offset;
-            let (ty, name) = self.declarator(&base_ty);
+            let (ty, name) = self.declarator(base_ty.clone());
             let var_data = Rc::new(RefCell::new(VarData { name, ty: ty.clone(), stack_offset: -1 }));
             self.vars.push(var_data.clone());
 
@@ -274,17 +274,17 @@ impl<'a> Parser<'a> {
     }
 
     // declspec = "int"
-    fn declspec(&mut self) -> Ty {
+    fn declspec(&mut self) -> Rc<Ty> {
         self.skip("int");
         Ty::int()
     }
 
     // declarator = "*"* ident type-suffix
-    fn declarator(&mut self, base_ty: &Ty) -> (Ty, AsciiStr) {
-        let mut ty = base_ty.clone();
+    fn declarator(&mut self, base_ty: Rc<Ty>) -> (Rc<Ty>, AsciiStr) {
+        let mut ty = base_ty;
         while self.peek_is("*") {
             self.advance();
-            ty = Ty::ptr(P::new(ty));
+            ty = Ty::ptr(ty);
         }
 
         let decl = match self.peek().kind {
@@ -303,7 +303,7 @@ impl<'a> Parser<'a> {
     // type-suffix = "(" func-params
     //             | "[" num "]" type-suffix
     //             | ε
-    fn type_suffix(&mut self, ty: Ty) -> Ty {
+    fn type_suffix(&mut self, ty: Rc<Ty>) -> Rc<Ty> {
         if self.peek_is("(") {
             return self.func_params(ty);
         }
@@ -313,14 +313,14 @@ impl<'a> Parser<'a> {
             let len = self.get_number();
             self.skip("]");
             let ty = self.type_suffix(ty);
-            return Ty::array(P::new(ty), len.try_into().unwrap());
+            return Ty::array(ty, len.try_into().unwrap());
         }
         return ty;
     }
 
     // func-params = (param ("," param)*)? ")"
     // param       = declspec declarator
-    fn func_params(&mut self, ty: Ty) -> Ty {
+    fn func_params(&mut self, ret_ty: Rc<Ty>) -> Rc<Ty> {
         let mut params = Vec::new();
         self.advance();
         while !self.peek_is(")") {
@@ -328,14 +328,14 @@ impl<'a> Parser<'a> {
                 self.skip(",");
             }
             let base_ty = self.declspec();
-            let (ty, name) = self.declarator(&base_ty);
-            params.push(P::new(ty.clone()));
+            let (ty, name) = self.declarator(base_ty);
+            params.push(ty.clone());
             self.vars.push(
                 Rc::new(RefCell::new(VarData { name, ty, stack_offset: -1 }))
             );
         }
         self.skip(")");
-        return Ty::func(P::new(ty), params);
+        return Ty::func(ret_ty, params);
     }
 
     // expr-stmt = expr? ";"
@@ -566,24 +566,16 @@ impl<'a> Parser<'a> {
             let offset = self.advance().offset;
             let node = P::new(self.unary());
             let ty = match &node.ty.kind {
-                TyKind::Array(base_ty, _) => Ty::ptr(P::new(*base_ty.clone())),
-                _ => Ty::ptr(P::new(node.ty.clone()))
+                TyKind::Array(base_ty, _) => Ty::ptr(base_ty.clone()),
+                _ => Ty::ptr(node.ty.clone())
             };
             return ExprNode { kind: ExprKind::Addr(node), offset, ty }
         }
 
         if self.peek_is("*") {
             let offset = self.advance().offset;
-            let node = P::new(self.unary());
-            let ty = match &node.ty.kind {
-                TyKind::Ptr(base) => *base.clone(),
-                TyKind::Array(base, _) => *base.clone(),
-                _ => {
-                    println!("{:?}", node);
-                    self.error_at(offset, "invalid pointer dereference")
-                }
-            };
-            return ExprNode { kind: ExprKind::Deref(node), offset, ty }
+            let node = self.unary();
+            return self.synth_deref(P::new(node), offset);
         }
 
         self.postfix()
@@ -731,6 +723,11 @@ impl<'a> Parser<'a> {
         };
         ExprNode { kind: ExprKind::Deref(expr), offset, ty }
     }
+
+    #[allow(dead_code)]
+    fn src_rest(&self) -> std::borrow::Cow<str> {
+        String::from_utf8_lossy(&self.src[self.peek().offset..])
+    }
 }
 
 fn synth_num(v: i64, offset: usize) -> ExprNode {
@@ -757,7 +754,7 @@ fn synth_div(lhs: P<ExprNode>, rhs: P<ExprNode>, offset: usize) -> ExprNode {
     ExprNode { kind: ExprKind::Div(lhs, rhs), offset, ty }
 }
 
-fn get_base_ty(ty: &Ty) -> Option<&Ty> {
+fn get_base_ty(ty: &Rc<Ty>) -> Option<&Rc<Ty>> {
     match &ty.kind {
         TyKind::Ptr(bt) => Some(bt),
         TyKind::Array(bt, _) => Some(bt),
