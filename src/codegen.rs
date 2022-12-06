@@ -1,26 +1,29 @@
 use crate::errors::ErrorReporting;
-use crate::parser::{TopDeclNode, TopDeclKind, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty, SP};
+use crate::parser::{Binding, BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty};
 
 const ARG_REGS: [&str;6] = [
     "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"
 ];
 
-fn update_stack_info(node: &mut TopDeclNode) {
+fn update_stack_info(node: &mut Binding) {
     match node.kind {
-        TopDeclKind::Function {
+        BindingKind::Function(Function {
             ref locals,
             ref mut stack_size,
             ..
-        } => {
+        }) => {
             let mut offset: i64 = 0;
             for local in locals {
                 let mut local = local.borrow_mut();
                 let ty_size: i64 = local.ty.size.try_into().unwrap();
-                offset -= ty_size;
-                local.stack_offset = offset;
+                if let BindingKind::LocalVar { stack_offset } = &mut local.kind {
+                    offset -= ty_size;
+                    *stack_offset = offset;
+                }
             }
             *stack_size = align_to(-offset, 16);
         }
+        _ => {}
     }
 }
 
@@ -29,7 +32,7 @@ pub struct Codegen<'a> {
     su: SourceUnit,
     depth: i64,
     id_count: usize,
-    cur_fn: Option<SP<TopDeclNode>>,
+    cur_ret_lbl: Option<String>
 }
 
 impl<'a> ErrorReporting for Codegen<'a> {
@@ -46,7 +49,7 @@ impl<'a> Codegen<'a> {
             su,
             depth: 0,
             id_count: 0,
-            cur_fn: None
+            cur_ret_lbl: None
         }
     }
 
@@ -54,24 +57,25 @@ impl<'a> Codegen<'a> {
         // This still sucks... just less than before
         for i in 0..self.su.len() {
             let decl = self.su[i].clone();
-            match decl.borrow().kind {
-                TopDeclKind::Function {
-                    ref name,
+            let decl = decl.borrow();
+            match decl.kind {
+                BindingKind::Function(Function {
                     ref params,
                     ref locals,
                     ref body,
                     stack_size
-                } => {
-                    self.cur_fn = Some(decl.clone());
-                    let name = String::from_utf8_lossy(name);
+                }) => {
+                    let name = String::from_utf8_lossy(&decl.name);
+                    let ret_lbl = format!(".L.return.{}", name);
+                    self.cur_ret_lbl = Some(ret_lbl);
 
                     println!();
                     println!("  .globl {}", name);
                     for local in locals {
-                        // just borrow doesn't work anymore, god knows why...
-                        // at some point I need to study how Rc and RefCell actually work...
-                        let local = local.borrow_mut();
-                        println!("# var {} offset {}", String::from_utf8_lossy(&local.name), local.stack_offset);
+                        let local = local.borrow();
+                        if let BindingKind::LocalVar { stack_offset } = local.kind {
+                            println!("# var {} offset {}", String::from_utf8_lossy(&local.name), stack_offset);
+                        }
                     }
                     println!("{}:", name);
 
@@ -82,20 +86,22 @@ impl<'a> Codegen<'a> {
                     println!();
 
                     for (i, param) in params.iter().enumerate() {
-                        let param = param.borrow_mut();
-                        println!("  mov {}, {}(%rbp)", ARG_REGS[i], param.stack_offset);
+                        if let BindingKind::LocalVar { stack_offset } = param.borrow().kind {
+                            println!("  mov {}, {}(%rbp)", ARG_REGS[i], stack_offset);
+                        }
                     }
 
-                    self.stmt(&body.borrow());
+                    self.stmt(&body);
                     self.sanity_checks();
 
                     println!();
-                    println!(".L.return.{}:", name);
+                    println!("{}:", self.cur_ret_lbl.as_ref().unwrap());
                     println!("  mov %rbp, %rsp");
                     println!("  pop %rbp");
                     println!("  ret");
                     println!();
                 }
+                _ => panic!("Unsupported")
             };
         }
     }
@@ -105,8 +111,8 @@ impl<'a> Codegen<'a> {
             StmtKind::Expr(ref expr) => self.expr(expr),
             StmtKind::Return(ref expr) => {
                 self.expr(expr);
-                let TopDeclKind::Function { ref name, .. } = &self.cur_fn.as_ref().unwrap().borrow().kind;
-                println!("  jmp .L.return.{}", String::from_utf8_lossy(name));
+                let ret_lbl = self.cur_ret_lbl.as_ref().unwrap();
+                println!("  jmp {}", ret_lbl);
             },
             StmtKind::Block(ref stmts) => {
                 for stmt in stmts {
@@ -276,7 +282,12 @@ impl<'a> Codegen<'a> {
     fn addr(&mut self, expr: &ExprNode) {
         match &expr.kind {
             ExprKind::Var(data) => {
-                println!("  lea {}(%rbp), %rax", &data.borrow_mut().stack_offset);
+                if let BindingKind::LocalVar { stack_offset } = data.borrow().kind {
+                    println!("  lea {}(%rbp), %rax", stack_offset);
+                }
+                else {
+                    panic!("Unsupported");
+                }
             },
             ExprKind::Deref(expr) => {
                 self.expr(expr);

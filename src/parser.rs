@@ -34,7 +34,6 @@ impl Ty {
     }
 }
 
-
 #[derive(Debug)]
 pub struct Node<Kind> {
     pub kind: Kind,
@@ -43,16 +42,32 @@ pub struct Node<Kind> {
 }
 
 #[derive(Debug)]
-pub struct VarData {
+pub struct Function {
+    pub params: Vec<SP<Binding>>,
+    pub locals: Vec<SP<Binding>>,
+    pub body: P<StmtNode>,
+    pub stack_size: i64
+}
+
+#[derive(Debug)]
+pub enum BindingKind {
+    GlobalVar,
+    LocalVar { stack_offset: i64 },
+    Function(Function),
+}
+
+#[derive(Debug)]
+pub struct Binding {
+    pub kind: BindingKind,
     pub name: AsciiStr,
     pub ty: Rc<Ty>,
-    pub stack_offset: i64
+    pub offset: usize,
 }
 
 #[derive(Debug)]
 pub enum ExprKind {
     Num(i64),
-    Var(SP<VarData>),
+    Var(SP<Binding>),
 
     Addr(P<ExprNode>),
     Deref(P<ExprNode>),
@@ -82,27 +97,15 @@ pub enum StmtKind {
     For(Option<P<StmtNode>>, Option<P<ExprNode>>, Option<P<ExprNode>>, P<StmtNode>)
 }
 
-#[derive(Debug, Clone)]
-pub enum TopDeclKind {
-    Function {
-        name: AsciiStr,
-        params: Vec<SP<VarData>>,
-        locals: Vec<SP<VarData>>,
-        body: SP<StmtNode>,
-        stack_size: i64
-    }
-}
-
 pub type ExprNode = Node<ExprKind>;
 pub type StmtNode = Node<StmtKind>;
-pub type TopDeclNode = Node<TopDeclKind>;
-pub type SourceUnit = Vec<SP<TopDeclNode>>;
+pub type SourceUnit = Vec<SP<Binding>>;
 
 pub struct Parser<'a> {
     src: &'a [u8],
     toks: &'a [Token],
     tok_index: usize,
-    vars: Vec<SP<VarData>>,
+    vars: Vec<SP<Binding>>,
 }
 
 impl<'a> ErrorReporting for Parser<'a> {
@@ -134,7 +137,7 @@ impl<'a> Parser<'a> {
         fns
     }
 
-    pub fn function(&mut self) -> TopDeclNode {
+    pub fn function(&mut self) -> Binding {
         self.vars.clear();
 
         let offset = self.peek().offset;
@@ -145,14 +148,18 @@ impl<'a> Parser<'a> {
 
         let body = self.compound_stmt();
         // Reverse them to keep the locals layout in line with chibicc
-        let locals: Vec<SP<VarData>> = self.vars.clone().into_iter().rev().collect();
-        TopDeclNode { kind: TopDeclKind::Function {
+        let locals: Vec<SP<Binding>> = self.vars.clone().into_iter().rev().collect();
+        Binding {
+            kind: BindingKind::Function(Function {
+                params,
+                locals,
+                body: P::new(body),
+                stack_size: -1
+            }),
             name,
-            params,
-            locals,
-            body: Rc::new(RefCell::new(body)),
-            stack_size: -1
-        }, offset, ty }
+            ty,
+            offset,
+        }
     }
 
     // stmt = "return" expr ";"
@@ -250,7 +257,12 @@ impl<'a> Parser<'a> {
 
             let offset = self.peek().offset;
             let (ty, name) = self.declarator(base_ty.clone());
-            let var_data = Rc::new(RefCell::new(VarData { name, ty: ty.clone(), stack_offset: -1 }));
+            let var_data = Rc::new(RefCell::new(Binding {
+                kind: BindingKind::LocalVar { stack_offset: -1 },
+                name,
+                ty: ty.clone(),
+                offset
+            }));
             self.vars.push(var_data.clone());
 
             if !self.peek_is("=") {
@@ -327,11 +339,17 @@ impl<'a> Parser<'a> {
             if params.len() > 0 {
                 self.skip(",");
             }
+            let offset = self.peek().offset;
             let base_ty = self.declspec();
             let (ty, name) = self.declarator(base_ty);
             params.push(ty.clone());
             self.vars.push(
-                Rc::new(RefCell::new(VarData { name, ty, stack_offset: -1 }))
+                Rc::new(RefCell::new(Binding {
+                    kind: BindingKind::LocalVar { stack_offset: -1 },
+                    name,
+                    ty,
+                    offset
+                }))
             );
         }
         self.skip(")");
