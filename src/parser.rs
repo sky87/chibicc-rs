@@ -105,7 +105,8 @@ pub struct Parser<'a> {
     src: &'a [u8],
     toks: &'a [Token],
     tok_index: usize,
-    vars: Vec<SP<Binding>>,
+    local_vars: Vec<SP<Binding>>,
+    global_vars: Vec<SP<Binding>>,
 }
 
 impl<'a> ErrorReporting for Parser<'a> {
@@ -121,34 +122,76 @@ impl<'a> Parser<'a> {
             src,
             toks,
             tok_index: 0,
-            vars: Vec::new()
+            local_vars: Vec::new(),
+            global_vars: Vec::new()
         }
     }
 
     // source_unit = stmt+
     pub fn source_unit(&mut self) -> SourceUnit {
-        let mut fns = Vec::new();
+        let mut su = Vec::new();
         loop {
             match self.peek().kind {
                 TokenKind::Eof => break,
-                _ => fns.push(Rc::new(RefCell::new(self.function()))),
+                _ => {
+                    if self.is_function() {
+                        su.push(Rc::new(RefCell::new(self.function())))
+                    }
+                    else {
+                        self.global_vars(&mut su);
+                    }
+                },
             }
         }
-        fns
+        su
     }
 
-    pub fn function(&mut self) -> Binding {
-        self.vars.clear();
+    fn global_vars(&mut self, bindings: &mut Vec<SP<Binding>>) {
+        let base_ty = self.declspec();
+
+        let mut first = true;
+        while !self.peek_is(";") {
+            if !first {
+                self.skip(",");
+            }
+            first = false;
+
+            let offset = self.peek().offset;
+            let (ty, name) = self.declarator(base_ty.clone());
+            let gvar = Binding { kind: BindingKind::GlobalVar, name, ty, offset };
+            let binding = Rc::new(RefCell::new(gvar));
+            self.global_vars.push(binding.clone());
+            bindings.push(binding);
+        }
+        self.skip(";");
+    }
+
+    fn is_function(&mut self) -> bool {
+        if self.peek_is(";") {
+            return false;
+        }
+
+        let idx = self.tok_index;
+        let base_ty = self.declspec();
+        let (ty, _) = self.declarator(base_ty);
+
+        self.tok_index = idx;
+        self.local_vars.clear();
+        matches!(ty.kind, TyKind::Fn(_, _))
+    }
+
+    fn function(&mut self) -> Binding {
+        self.local_vars.clear();
 
         let offset = self.peek().offset;
-        let ty = self.declspec();
-        let (ty, name) = self.declarator(ty);
+        let base_ty = self.declspec();
+        let (ty, name) = self.declarator(base_ty);
 
-        let params = self.vars.clone();
+        let params = self.local_vars.clone();
 
         let body = self.compound_stmt();
         // Reverse them to keep the locals layout in line with chibicc
-        let locals: Vec<SP<Binding>> = self.vars.clone().into_iter().rev().collect();
+        let locals: Vec<SP<Binding>> = self.local_vars.clone().into_iter().rev().collect();
         Binding {
             kind: BindingKind::Function(Function {
                 params,
@@ -263,7 +306,7 @@ impl<'a> Parser<'a> {
                 ty: ty.clone(),
                 offset
             }));
-            self.vars.push(var_data.clone());
+            self.local_vars.push(var_data.clone());
 
             if !self.peek_is("=") {
                 continue;
@@ -308,7 +351,7 @@ impl<'a> Parser<'a> {
             _ => self.error_tok(self.peek(), "expected a variable name")
         };
 
-        println!("# DECL {}: {:?}", String::from_utf8_lossy(&decl.1), decl.0);
+        //println!("# DECL {}: {:?}", String::from_utf8_lossy(&decl.1), decl.0);
         decl
     }
 
@@ -343,7 +386,7 @@ impl<'a> Parser<'a> {
             let base_ty = self.declspec();
             let (ty, name) = self.declarator(base_ty);
             params.push(ty.clone());
-            self.vars.push(
+            self.local_vars.push(
                 Rc::new(RefCell::new(Binding {
                     kind: BindingKind::LocalVar { stack_offset: -1 },
                     name,
@@ -636,7 +679,15 @@ impl<'a> Parser<'a> {
                 let name = self.tok_source(tok).to_owned();
                 self.advance();
 
-                let var_data = self.vars.iter().find(|v| v.borrow().name == name);
+                let mut var_data = self.local_vars.iter().find(|v|
+                    v.borrow().name == name
+                );
+                if let None = var_data {
+                    var_data = self.global_vars.iter().find(|v|
+                        v.borrow().name == name
+                    );
+                }
+
                 if let Some(var_data) = var_data {
                     let ty = var_data.borrow_mut().ty.clone();
                     let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), offset, ty };

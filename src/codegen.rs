@@ -54,54 +54,69 @@ impl<'a> Codegen<'a> {
     }
 
     pub fn program(&mut self) {
+        self.data_sections();
+        self.text_section();
+    }
+
+    fn data_sections(&self) {
+        for binding in &self.su {
+            let binding = binding.borrow();
+            if let BindingKind::GlobalVar = binding.kind {
+                let name = String::from_utf8_lossy(&binding.name);
+                println!("  .data");
+                println!("  .globl {}", name);
+                println!("{}:", name);
+                println!("  .zero {}", binding.ty.size);
+            }
+        }
+    }
+
+    fn text_section(&mut self) {
         // This still sucks... just less than before
         for i in 0..self.su.len() {
             let decl = self.su[i].clone();
             let decl = decl.borrow();
-            match decl.kind {
-                BindingKind::Function(Function {
-                    ref params,
-                    ref locals,
-                    ref body,
-                    stack_size
-                }) => {
-                    let name = String::from_utf8_lossy(&decl.name);
-                    let ret_lbl = format!(".L.return.{}", name);
-                    self.cur_ret_lbl = Some(ret_lbl);
+            if let BindingKind::Function(Function {
+                ref params,
+                ref locals,
+                ref body,
+                stack_size
+            }) = decl.kind {
+                let name = String::from_utf8_lossy(&decl.name);
+                let ret_lbl = format!(".L.return.{}", name);
+                self.cur_ret_lbl = Some(ret_lbl);
 
-                    println!();
-                    println!("  .globl {}", name);
-                    for local in locals {
-                        let local = local.borrow();
-                        if let BindingKind::LocalVar { stack_offset } = local.kind {
-                            println!("# var {} offset {}", String::from_utf8_lossy(&local.name), stack_offset);
-                        }
+                println!();
+                println!("  .globl {}", name);
+                for local in locals {
+                    let local = local.borrow();
+                    if let BindingKind::LocalVar { stack_offset } = local.kind {
+                        println!("# var {} offset {}", String::from_utf8_lossy(&local.name), stack_offset);
                     }
-                    println!("{}:", name);
-
-                    // Prologue
-                    println!("  push %rbp");
-                    println!("  mov %rsp, %rbp");
-                    println!("  sub ${}, %rsp", stack_size);
-                    println!();
-
-                    for (i, param) in params.iter().enumerate() {
-                        if let BindingKind::LocalVar { stack_offset } = param.borrow().kind {
-                            println!("  mov {}, {}(%rbp)", ARG_REGS[i], stack_offset);
-                        }
-                    }
-
-                    self.stmt(&body);
-                    self.sanity_checks();
-
-                    println!();
-                    println!("{}:", self.cur_ret_lbl.as_ref().unwrap());
-                    println!("  mov %rbp, %rsp");
-                    println!("  pop %rbp");
-                    println!("  ret");
-                    println!();
                 }
-                _ => panic!("Unsupported")
+                println!("{}:", name);
+
+                // Prologue
+                println!("  push %rbp");
+                println!("  mov %rsp, %rbp");
+                println!("  sub ${}, %rsp", stack_size);
+                println!();
+
+                for (i, param) in params.iter().enumerate() {
+                    if let BindingKind::LocalVar { stack_offset } = param.borrow().kind {
+                        println!("  mov {}, {}(%rbp)", ARG_REGS[i], stack_offset);
+                    }
+                }
+
+                self.stmt(&body);
+                self.sanity_checks();
+
+                println!();
+                println!("{}:", self.cur_ret_lbl.as_ref().unwrap());
+                println!("  mov %rbp, %rsp");
+                println!("  pop %rbp");
+                println!("  ret");
+                println!();
             };
         }
     }
@@ -282,11 +297,15 @@ impl<'a> Codegen<'a> {
     fn addr(&mut self, expr: &ExprNode) {
         match &expr.kind {
             ExprKind::Var(data) => {
-                if let BindingKind::LocalVar { stack_offset } = data.borrow().kind {
-                    println!("  lea {}(%rbp), %rax", stack_offset);
-                }
-                else {
-                    panic!("Unsupported");
+                let data = data.borrow();
+                match data.kind {
+                    BindingKind::LocalVar { stack_offset } => {
+                        println!("  lea {}(%rbp), %rax", stack_offset);
+                    }
+                    BindingKind::GlobalVar => {
+                        println!("  lea {}(%rip), %rax", String::from_utf8_lossy(&data.name));
+                    }
+                    _ => panic!("Unsupported")
                 }
             },
             ExprKind::Deref(expr) => {
