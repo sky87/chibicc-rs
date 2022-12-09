@@ -11,6 +11,7 @@ pub type AsciiStr = Vec<u8>;
 #[derive(Debug)]
 pub enum TyKind {
     Int,
+    Char,
     Ptr(Rc<Ty>),
     Fn(Rc<Ty>, Vec<Rc<Ty>>),
     Array(Rc<Ty>, usize),
@@ -25,12 +26,34 @@ pub struct Ty {
 
 impl Ty {
     fn int() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Int, size: 8 }) }
+    fn char() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Char, size: 1 }) }
     fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 0 }) }
     fn ptr(base: Rc<Ty>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Ptr(base), size: 8 }) }
     fn func(ret: Rc<Ty>, params: Vec<Rc<Ty>>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Fn(ret, params), size: 0 }) }
     fn array(base: Rc<Ty>, len: usize) -> Rc<Ty> {
         let base_size = base.size;
         Rc::new(Ty { kind: TyKind::Array(base, len), size: base_size*len })
+    }
+
+    fn is_integer_like(&self) -> bool {
+        match &self.kind {
+            TyKind::Int | TyKind::Char => true,
+            _ => false,
+        }
+    }
+
+    fn is_pointer_like(&self) -> bool {
+        match &self.kind {
+            TyKind::Ptr(_) | TyKind::Array(_, _) => true,
+            _ => false
+        }
+    }
+
+    fn base_ty(&self) -> Option<&Ty> {
+        match &self.kind {
+            TyKind::Ptr(base_ty) | TyKind::Array(base_ty, _) => Some(base_ty),
+            _ => None
+        }
     }
 }
 
@@ -276,7 +299,7 @@ impl<'a> Parser<'a> {
         let offset = self.skip("{").offset;
         let mut stmts = Vec::new();
         while !self.peek_is("}") {
-            if self.peek_is("int") {
+            if self.peek_is_ty_name() {
                 self.declaration(&mut stmts);
             }
             else {
@@ -285,6 +308,10 @@ impl<'a> Parser<'a> {
         }
         self.advance();
         StmtNode { kind: StmtKind::Block(stmts), offset, ty: Ty::unit() }
+    }
+
+    fn peek_is_ty_name(&self) -> bool {
+        self.peek_is("char") || self.peek_is("int")
     }
 
     // declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
@@ -328,8 +355,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // declspec = "int"
+    // declspec = "int" | "char"
     fn declspec(&mut self) -> Rc<Ty> {
+        if self.peek_is("char") {
+            self.advance();
+            return Ty::char()
+        }
+
         self.skip("int");
         Ty::int()
     }
@@ -534,47 +566,49 @@ impl<'a> Parser<'a> {
         let mut lhs = lhs;
         let mut rhs = rhs;
 
-        if let TyKind::Int = lhs.ty.kind {
-            if let TyKind::Ptr(_) | TyKind::Array(_, _) = rhs.ty.kind {
+        if lhs.ty.is_integer_like() {
+            if rhs.ty.is_pointer_like() {
                 let tmp = lhs;
                 lhs = rhs;
                 rhs = tmp;
             }
         }
 
-        match (&lhs.ty.kind, &rhs.ty.kind) {
-            (TyKind::Int, TyKind::Int) => {
-                synth_add(lhs, rhs, offset)
-            },
-            (TyKind::Ptr(bt), TyKind::Int) | (TyKind::Array(bt, _), TyKind::Int) => {
-                let size = P::new(synth_num(bt.size.try_into().unwrap(), offset));
-                let rhs = synth_mul(size, rhs, offset);
-                synth_add(lhs, P::new(rhs), offset)
-            },
-            _ => self.error_at(offset, "invalid operands")
+        if lhs.ty.is_integer_like() && rhs.ty.is_integer_like() {
+            return synth_add(lhs, rhs, offset);
         }
+
+        if lhs.ty.is_pointer_like() && rhs.ty.is_integer_like() {
+            let base_ty = lhs.ty.base_ty().unwrap();
+            let size = P::new(synth_num(base_ty.size.try_into().unwrap(), offset));
+            let rhs = synth_mul(size, rhs, offset);
+            return synth_add(lhs, P::new(rhs), offset)
+        }
+
+        self.error_at(offset, "invalid operands");
     }
 
     fn sub_overload(&self, lhs: P<ExprNode>, rhs: P<ExprNode>, offset: usize) -> ExprNode {
-        match (&lhs.ty.kind, &rhs.ty.kind) {
-            (TyKind::Int, TyKind::Int) => {
-                synth_sub(lhs, rhs, offset)
-            },
-            (TyKind::Ptr(bt), TyKind::Int) | (TyKind::Array(bt, _), TyKind::Int) => {
-                let size = P::new(synth_num(bt.size.try_into().unwrap(), offset));
-                let rhs = synth_mul(size, rhs, offset);
-                synth_sub(lhs, P::new(rhs), offset)
-            },
-            // TODO better way than combinatorial explosion?
-            (TyKind::Ptr(bt), TyKind::Ptr(_)) | (TyKind::Array(bt, _), TyKind::Ptr(_)) |
-            (TyKind::Ptr(bt), TyKind::Array(_, _)) | (TyKind::Array(bt, _), TyKind::Array(_,_)) => {
-                let size: i64 = bt.size.try_into().unwrap();
-                let mut sub = synth_sub(lhs, rhs, offset);
-                sub.ty = Ty::int();
-                synth_div(P::new(sub), P::new(synth_num(size, offset)), offset)
-            }
-            _ => self.error_at(offset, "invalid operands")
+        if lhs.ty.is_integer_like() && rhs.ty.is_integer_like() {
+            return synth_sub(lhs, rhs, offset);
         }
+
+        if lhs.ty.is_pointer_like() && rhs.ty.is_integer_like() {
+            let base_ty = lhs.ty.base_ty().unwrap();
+            let size = P::new(synth_num(base_ty.size.try_into().unwrap(), offset));
+            let rhs = synth_mul(size, rhs, offset);
+            return synth_sub(lhs, P::new(rhs), offset);
+        }
+
+        if lhs.ty.is_pointer_like() && rhs.ty.is_pointer_like() {
+            let base_ty = lhs.ty.base_ty().unwrap();
+            let size: i64 = base_ty.size.try_into().unwrap();
+            let mut sub = synth_sub(lhs, rhs, offset);
+            sub.ty = Ty::int();
+            return synth_div(P::new(sub), P::new(synth_num(size, offset)), offset);
+        }
+
+        self.error_at(offset, "invalid operands");
     }
 
     // mul = unary ("*" unary | "/" unary)*

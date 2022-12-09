@@ -1,7 +1,10 @@
 use crate::errors::ErrorReporting;
 use crate::parser::{Binding, BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty};
 
-const ARG_REGS: [&str;6] = [
+const ARG_REGS8: [&str;6] = [
+    "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"
+];
+const ARG_REGS64: [&str;6] = [
     "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"
 ];
 
@@ -103,8 +106,14 @@ impl<'a> Codegen<'a> {
                 println!();
 
                 for (i, param) in params.iter().enumerate() {
-                    if let BindingKind::LocalVar { stack_offset } = param.borrow().kind {
-                        println!("  mov {}, {}(%rbp)", ARG_REGS[i], stack_offset);
+                    let param = param.borrow();
+                    if let BindingKind::LocalVar { stack_offset } = param.kind {
+                        if param.ty.size == 1 {
+                            println!("  mov {}, {}(%rbp)", ARG_REGS8[i], stack_offset);
+                        }
+                        else {
+                            println!("  mov {}, {}(%rbp)", ARG_REGS64[i], stack_offset);
+                        }
                     }
                 }
 
@@ -185,7 +194,7 @@ impl<'a> Codegen<'a> {
                     self.push();
                 }
                 for i in (0..args.len()).rev() {
-                    self.pop(ARG_REGS[i]);
+                    self.pop(ARG_REGS64[i]);
                 }
                 println!("  mov $0, %rax");
                 println!("  call {}", String::from_utf8_lossy(name));
@@ -201,7 +210,7 @@ impl<'a> Codegen<'a> {
                 self.addr(lhs);
                 self.push();
                 self.expr(rhs);
-                self.store();
+                self.store(&node.ty);
             }
             ExprKind::Add(lhs, rhs) => {
                 self.expr(rhs.as_ref());
@@ -276,12 +285,24 @@ impl<'a> Codegen<'a> {
         if let TyKind::Array(_, _) = ty.kind {
             return;
         }
-        println!("  mov (%rax), %rax");
+
+        if ty.size == 1 {
+            println!("  movsbq (%rax), %rax");
+        }
+        else {
+            println!("  mov (%rax), %rax");
+        }
     }
 
-    fn store(&mut self) {
+    fn store(&mut self, ty: &Ty) {
         self.pop("%rdi");
-        println!("  mov %rax, (%rdi)");
+
+        if ty.size == 1 {
+            println!("  mov %al, (%rdi)");
+        }
+        else {
+            println!("  mov %rax, (%rdi)");
+        }
     }
 
     fn push(&mut self) {

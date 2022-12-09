@@ -25,7 +25,7 @@ lazy_static! {
             "if", "else",
             "for", "while",
             "sizeof",
-            "int"
+            "int", "char"
         ].map(|k| k.as_bytes()).into()
     };
 }
