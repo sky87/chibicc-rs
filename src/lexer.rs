@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::errors::ErrorReporting;
+use crate::{errors::ErrorReporting, parser::AsciiStr};
 
 #[derive(Debug)]
 pub enum TokenKind {
@@ -8,6 +8,7 @@ pub enum TokenKind {
     Ident,
     Keyword,
     Num(i64),
+    Str(AsciiStr),
     Eof
 }
 
@@ -31,7 +32,7 @@ lazy_static! {
 }
 
 pub struct Lexer<'a> {
-    src: &'a [u8],
+    src: &'a [u8]
 }
 
 impl<'a> ErrorReporting for Lexer<'a> {
@@ -43,12 +44,12 @@ impl<'a> Lexer<'a> {
         Self { src }
     }
 
-    pub fn tokenize(&self) -> Vec<Token> {
+    pub fn tokenize(&mut self) -> Vec<Token> {
         let mut toks = Vec::new();
         let mut offset = 0;
         let src = self.src;
 
-        while offset < src.len() {
+        while src[offset] != 0 {
             let c = src[offset];
 
             if c.is_ascii_whitespace() {
@@ -67,23 +68,44 @@ impl<'a> Lexer<'a> {
                 offset += count;
             }
             else if is_ident_start(c) {
-              let start_offset = offset;
-              loop {
-                  offset += 1;
-                  if !is_ident_cont(src[offset]) { break; }
-              }
-              let name = &src[start_offset..offset];
-              let kind = if KEYWORDS.contains(&name) {
-                  TokenKind::Keyword
-              }
-              else {
-                  TokenKind::Ident
-              };
-              toks.push(Token {
-                  offset: start_offset,
-                  length: offset - start_offset,
-                  kind,
-              });
+                let start_offset = offset;
+                loop {
+                    offset += 1;
+                    if !is_ident_cont(src[offset]) { break; }
+                }
+                let name = &src[start_offset..offset];
+                let kind = if KEYWORDS.contains(&name) {
+                    TokenKind::Keyword
+                }
+                else {
+                    TokenKind::Ident
+                };
+                toks.push(Token {
+                    offset: start_offset,
+                    length: offset - start_offset,
+                    kind,
+                });
+            }
+            else if c == b'"' {
+                let start_offset = offset;
+                offset += 1;
+
+                let mut str = Vec::new();
+                while src[offset] != b'"' {
+                    if src[offset] == b'\n' || src[offset] == 0 {
+                        self.error_at(start_offset, "unclosed literal string");
+                    }
+                    str.push(src[offset]);
+                    offset += 1;
+                }
+                offset += 1;
+                str.push(0);
+
+                toks.push(Token {
+                    offset,
+                    length: offset - start_offset,
+                    kind: TokenKind::Str(str),
+                });
             }
             else {
                 let punct_len = read_punct(&src[offset..]);

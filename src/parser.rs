@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+
 use std::rc::Rc;
 
 use crate::lexer::{Token, TokenKind};
@@ -74,7 +75,7 @@ pub struct Function {
 
 #[derive(Debug)]
 pub enum BindingKind {
-    GlobalVar,
+    GlobalVar { init_data: Option<Vec<u8>> },
     LocalVar { stack_offset: i64 },
     Function(Function),
 }
@@ -130,6 +131,7 @@ pub struct Parser<'a> {
     tok_index: usize,
     local_vars: Vec<SP<Binding>>,
     global_vars: Vec<SP<Binding>>,
+    next_unique_id: u64,
 }
 
 impl<'a> ErrorReporting for Parser<'a> {
@@ -146,30 +148,31 @@ impl<'a> Parser<'a> {
             toks,
             tok_index: 0,
             local_vars: Vec::new(),
-            global_vars: Vec::new()
+            global_vars: Vec::new(),
+            next_unique_id: 0
         }
     }
 
     // source_unit = stmt+
     pub fn source_unit(&mut self) -> SourceUnit {
-        let mut su = Vec::new();
         loop {
             match self.peek().kind {
                 TokenKind::Eof => break,
                 _ => {
                     if self.is_function() {
-                        su.push(Rc::new(RefCell::new(self.function())))
+                        self.function();
                     }
                     else {
-                        self.global_vars(&mut su);
+                        self.global_vars();
                     }
                 },
             }
         }
-        su
+        // TODO Any method to "reset the member vector and return a new vec not owned by the struct without cloning"?
+        self.global_vars.clone()
     }
 
-    fn global_vars(&mut self, bindings: &mut Vec<SP<Binding>>) {
+    fn global_vars(&mut self) {
         let base_ty = self.declspec();
 
         let mut first = true;
@@ -181,10 +184,9 @@ impl<'a> Parser<'a> {
 
             let offset = self.peek().offset;
             let (ty, name) = self.declarator(base_ty.clone());
-            let gvar = Binding { kind: BindingKind::GlobalVar, name, ty, offset };
+            let gvar = Binding { kind: BindingKind::GlobalVar { init_data: None }, name, ty, offset };
             let binding = Rc::new(RefCell::new(gvar));
             self.global_vars.push(binding.clone());
-            bindings.push(binding);
         }
         self.skip(";");
     }
@@ -203,7 +205,7 @@ impl<'a> Parser<'a> {
         matches!(ty.kind, TyKind::Fn(_, _))
     }
 
-    fn function(&mut self) -> Binding {
+    fn function(&mut self) {
         self.local_vars.clear();
 
         let offset = self.peek().offset;
@@ -215,7 +217,7 @@ impl<'a> Parser<'a> {
         let body = self.compound_stmt();
         // Reverse them to keep the locals layout in line with chibicc
         let locals: Vec<SP<Binding>> = self.local_vars.clone().into_iter().rev().collect();
-        Binding {
+        self.global_vars.push(Rc::new(RefCell::new(Binding {
             kind: BindingKind::Function(Function {
                 params,
                 locals,
@@ -225,7 +227,7 @@ impl<'a> Parser<'a> {
             name,
             ty,
             offset,
-        }
+        })));
     }
 
     // stmt = "return" expr ";"
@@ -689,7 +691,7 @@ impl<'a> Parser<'a> {
         node
     }
 
-    // primary = "(" expr ")" | "sizeof" unary | funcall | num
+    // primary = "(" expr ")" | "sizeof" unary | funcall | num | str
     fn primary(&mut self) -> ExprNode {
         match self.peek().kind {
             TokenKind::Num(val) => {
@@ -701,6 +703,24 @@ impl<'a> Parser<'a> {
                     self.advance();
                     let node = self.unary();
                     return synth_num(node.ty.size.try_into().unwrap(), node.offset);
+                }
+            }
+            TokenKind::Str(ref str) => {
+                let ty = Ty::array(Ty::char(), str.len());
+                let init_data = Some(str.to_owned());
+                let offset = self.advance().offset;
+                let name = self.mk_unique_id(".L..");
+                let binding = Rc::new(RefCell::new(Binding {
+                    kind: BindingKind::GlobalVar { init_data },
+                    name,
+                    ty: ty.clone(),
+                    offset
+                }));
+                self.global_vars.push(binding.clone());
+                return ExprNode {
+                    kind: ExprKind::Var(binding),
+                    offset,
+                    ty,
                 }
             }
             TokenKind::Ident => {
@@ -825,6 +845,12 @@ impl<'a> Parser<'a> {
             Some(base_ty) => base_ty.clone()
         };
         ExprNode { kind: ExprKind::Deref(expr), offset, ty }
+    }
+
+    fn mk_unique_id(&mut self, prefix: &str) -> AsciiStr {
+        let res = format!("{}{}", prefix, self.next_unique_id);
+        self.next_unique_id += 1;
+        res.into_bytes()
     }
 
     #[allow(dead_code)]

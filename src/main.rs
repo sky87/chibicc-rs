@@ -16,17 +16,20 @@ fn main() {
         panic!("{}: invalid number of arguments", args[0]);
     }
 
-    let src = args[1].as_bytes();
+    let mut src = args[1].as_bytes().to_vec();
 
-    let lexer = Lexer::new(src);
+    // It's nice to have a sentinel value so we don't have to keep checking bounds
+    src.push(0);
+
+    let mut lexer = Lexer::new(&src);
 
     let toks = lexer.tokenize();
 
-    let mut parser = Parser::new(src, &toks);
+    let mut parser = Parser::new(&src, &toks);
 
     let su = parser.source_unit();
     parser.ensure_done();
 
-    let mut codegen = Codegen::new(src, su);
+    let mut codegen = Codegen::new(&src, su);
     codegen.program();
 }

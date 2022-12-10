@@ -64,18 +64,34 @@ impl<'a> Codegen<'a> {
     fn data_sections(&self) {
         for binding in &self.su {
             let binding = binding.borrow();
-            if let BindingKind::GlobalVar = binding.kind {
+            if let BindingKind::GlobalVar { init_data } = &binding.kind {
                 let name = String::from_utf8_lossy(&binding.name);
                 println!("  .data");
                 println!("  .globl {}", name);
                 println!("{}:", name);
-                println!("  .zero {}", binding.ty.size);
+                if let Some(init_data) = init_data {
+                    print!("  .byte ");
+                    let mut it = init_data.iter().peekable();
+                    while let Some(b) = it.next() {
+                        if it.peek().is_none() {
+                            println!("{}", b);
+                        }
+                        else {
+                            print!("{},", b);
+                        }
+                    }
+                }
+                else {
+                    println!("  .zero {}", binding.ty.size);
+                }
             }
         }
     }
 
     fn text_section(&mut self) {
         // This still sucks... just less than before
+        println!();
+        println!("  .text");
         for i in 0..self.su.len() {
             let decl = self.su[i].clone();
             let decl = decl.borrow();
@@ -319,11 +335,11 @@ impl<'a> Codegen<'a> {
         match &expr.kind {
             ExprKind::Var(data) => {
                 let data = data.borrow();
-                match data.kind {
+                match &data.kind {
                     BindingKind::LocalVar { stack_offset } => {
                         println!("  lea {}(%rbp), %rax", stack_offset);
                     }
-                    BindingKind::GlobalVar => {
+                    BindingKind::GlobalVar {..} => {
                         println!("  lea {}(%rip), %rax", String::from_utf8_lossy(&data.name));
                     }
                     _ => panic!("Unsupported")
