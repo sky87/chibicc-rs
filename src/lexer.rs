@@ -95,14 +95,26 @@ impl<'a> Lexer<'a> {
                     if src[offset] == b'\n' || src[offset] == 0 {
                         self.error_at(start_offset, "unclosed literal string");
                     }
-                    str.push(src[offset]);
-                    offset += 1;
+
+                    if src[offset] == b'\\' {
+                        let e = src[offset + 1];
+                        let c = unescape(src[offset + 1])
+                            // Keep behaviour the same as chibicc
+                            // is this standard?
+                            .unwrap_or(e);
+                        str.push(c);
+                        offset += 2;
+                    }
+                    else {
+                        str.push(src[offset]);
+                        offset += 1;
+                    }
                 }
                 offset += 1;
                 str.push(0);
 
                 toks.push(Token {
-                    offset,
+                    offset: start_offset,
                     length: offset - start_offset,
                     kind: TokenKind::Str(str),
                 });
@@ -172,5 +184,20 @@ fn read_punct(src: &[u8]) -> usize {
     }
     else {
         0
+    }
+}
+
+fn unescape(b: u8) -> Option<u8> {
+    match b {
+        b'a' => Some(0x07),
+        b'b' => Some(0x08),
+        b't' => Some(0x09),
+        b'n' => Some(0x0A),
+        b'v' => Some(0x0B),
+        b'f' => Some(0x0C),
+        b'r' => Some(0x0D),
+        // [GNU] \e for the ASCII escape character is a GNU C extension.
+        b'e' => Some(0x1B),
+        _ => None
     }
 }
