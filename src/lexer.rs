@@ -97,13 +97,10 @@ impl<'a> Lexer<'a> {
                     }
 
                     if src[offset] == b'\\' {
-                        let e = src[offset + 1];
-                        let c = unescape(src[offset + 1])
-                            // Keep behaviour the same as chibicc
-                            // is this standard?
-                            .unwrap_or(e);
+                        offset += 1;
+                        let (c, len) = read_escaped_char(&src[offset..]);
                         str.push(c);
-                        offset += 2;
+                        offset += len;
                     }
                     else {
                         str.push(src[offset]);
@@ -137,6 +134,33 @@ impl<'a> Lexer<'a> {
 
         toks.push(Token { offset, length: 0, kind: TokenKind::Eof });
         toks
+    }
+}
+
+fn read_escaped_char(buf: &[u8]) -> (u8, usize) {
+    let mut oct = 0;
+    let mut oct_len = 0;
+    while (oct_len < 3 && oct_len < buf.len()) &&
+          (buf[oct_len] >= b'0' && buf[oct_len] <= b'7')
+    {
+        oct = 8*oct + (buf[oct_len] - b'0');
+        oct_len += 1;
+    }
+    if oct_len > 0 {
+        return (oct, oct_len)
+    }
+
+    match buf[0] {
+        b'a' => (0x07, 1),
+        b'b' => (0x08, 1),
+        b't' => (0x09, 1),
+        b'n' => (0x0A, 1),
+        b'v' => (0x0B, 1),
+        b'f' => (0x0C, 1),
+        b'r' => (0x0D, 1),
+        // [GNU] \e for the ASCII escape character is a GNU C extension.
+        b'e' => (0x1B, 1),
+        _ => (buf[0], 1)
     }
 }
 
@@ -184,20 +208,5 @@ fn read_punct(src: &[u8]) -> usize {
     }
     else {
         0
-    }
-}
-
-fn unescape(b: u8) -> Option<u8> {
-    match b {
-        b'a' => Some(0x07),
-        b'b' => Some(0x08),
-        b't' => Some(0x09),
-        b'n' => Some(0x0A),
-        b'v' => Some(0x0B),
-        b'f' => Some(0x0C),
-        b'r' => Some(0x0D),
-        // [GNU] \e for the ASCII escape character is a GNU C extension.
-        b'e' => Some(0x1B),
-        _ => None
     }
 }
