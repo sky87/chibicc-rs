@@ -98,7 +98,7 @@ impl<'a> Lexer<'a> {
 
                     if src[offset] == b'\\' {
                         offset += 1;
-                        let (c, len) = read_escaped_char(&src[offset..]);
+                        let (c, len) = self.read_escaped_char(&src[offset..], offset - 1);
                         str.push(c);
                         offset += len;
                     }
@@ -135,32 +135,47 @@ impl<'a> Lexer<'a> {
         toks.push(Token { offset, length: 0, kind: TokenKind::Eof });
         toks
     }
-}
 
-fn read_escaped_char(buf: &[u8]) -> (u8, usize) {
-    let mut oct = 0;
-    let mut oct_len = 0;
-    while (oct_len < 3 && oct_len < buf.len()) &&
-          (buf[oct_len] >= b'0' && buf[oct_len] <= b'7')
-    {
-        oct = 8*oct + (buf[oct_len] - b'0');
-        oct_len += 1;
-    }
-    if oct_len > 0 {
-        return (oct, oct_len)
-    }
+    fn read_escaped_char(&self, buf: &[u8], error_offset: usize) -> (u8, usize) {
+        let mut oct = 0;
+        let mut len = 0;
+        while (len < 3 && len < buf.len()) &&
+            (buf[len] >= b'0' && buf[len] <= b'7')
+        {
+            oct = 8*oct + (buf[len] - b'0');
+            len += 1;
+        }
+        if len > 0 {
+            return (oct, len)
+        }
 
-    match buf[0] {
-        b'a' => (0x07, 1),
-        b'b' => (0x08, 1),
-        b't' => (0x09, 1),
-        b'n' => (0x0A, 1),
-        b'v' => (0x0B, 1),
-        b'f' => (0x0C, 1),
-        b'r' => (0x0D, 1),
-        // [GNU] \e for the ASCII escape character is a GNU C extension.
-        b'e' => (0x1B, 1),
-        _ => (buf[0], 1)
+        if buf[0] == b'x' {
+            if !buf[1].is_ascii_hexdigit() {
+                self.error_at(error_offset, "invalid hex escape sequence");
+            }
+            let mut hex = 0;
+            let mut len = 1;
+            // The standard supports only 2 hex digits max, but chibicc
+            // does allow an arbitrary number
+            while len < buf.len() && buf[len].is_ascii_hexdigit() {
+                hex = 16*hex + digit_to_number(buf[len]);
+                len += 1;
+            }
+            return (hex, len);
+        }
+
+        match buf[0] {
+            b'a' => (0x07, 1),
+            b'b' => (0x08, 1),
+            b't' => (0x09, 1),
+            b'n' => (0x0A, 1),
+            b'v' => (0x0B, 1),
+            b'f' => (0x0C, 1),
+            b'r' => (0x0D, 1),
+            // [GNU] \e for the ASCII escape character is a GNU C extension.
+            b'e' => (0x1B, 1),
+            _ => (buf[0], 1)
+        }
     }
 }
 
@@ -178,6 +193,19 @@ fn read_int(buf: &[u8]) -> (i64, usize) {
         }
     }
     return (acc, offset);
+}
+
+fn digit_to_number(digit: u8) -> u8 {
+    if digit.is_ascii_digit() {
+        return digit - b'0';
+    }
+    if digit.is_ascii_uppercase() {
+        return digit - b'A' + 10;
+    }
+    if digit.is_ascii_lowercase() {
+        return digit - b'a' + 10;
+    }
+    panic!("invalid digit");
 }
 
 fn ispunct(c: u8) -> bool {
