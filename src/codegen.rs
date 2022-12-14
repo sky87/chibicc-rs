@@ -293,6 +293,13 @@ impl<'a> Codegen<'a> {
                 println!("  setl %al");
                 println!("  movzb %al, %rax");
             }
+            ExprKind::StmtExpr(body) => {
+                if let StmtKind::Block(stmts) = &body.kind {
+                    for stmt in stmts {
+                        self.stmt(stmt);
+                    }
+                }
+            }
         };
     }
 

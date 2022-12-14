@@ -109,6 +109,8 @@ pub enum ExprKind {
     Lt(P<ExprNode>, P<ExprNode>),
     Le(P<ExprNode>, P<ExprNode>),
 
+    StmtExpr(P<StmtNode>),
+
     Assign(P<ExprNode>, P<ExprNode>),
 }
 
@@ -691,7 +693,12 @@ impl<'a> Parser<'a> {
         node
     }
 
-    // primary = "(" expr ")" | "sizeof" unary | funcall | num | str
+    // primary = "(" "{" stmt+ "}" ")"
+    //         | "(" expr ")"
+    //         | "sizeof" unary
+    //         | ident func-args?
+    //         | str
+    //         | num
     fn primary(&mut self) -> ExprNode {
         match self.peek().kind {
             TokenKind::Num(val) => {
@@ -753,8 +760,37 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Punct =>
                 if self.peek_is("(") {
+                    let offset = self.peek().offset;
                     self.advance();
-                    let node = self.expr();
+
+                    let node = if self.peek_is("{") {
+                        let body = self.compound_stmt();
+                        let ty = if let StmtKind::Block(ref stmts) = body.kind {
+                            if let Some(last) = stmts.last() {
+                                if let StmtKind::Expr(exp) = &last.kind {
+                                    exp.ty.clone()
+                                }
+                                else {
+                                    self.error_at(offset, "the last statement in a statement expression must be an expression");
+                                }
+                            }
+                            else {
+                                self.error_at(offset, "statement expression cannot be empty");
+                            }
+                        }
+                        else {
+                            panic!("expected block")
+                        };
+                        ExprNode {
+                            kind: ExprKind::StmtExpr(P::new(body)),
+                            offset,
+                            ty,
+                        }
+                    }
+                    else {
+                        self.expr()
+                    };
+
                     self.skip(")");
                     return node
                 },
