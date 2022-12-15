@@ -10,10 +10,10 @@
       "request": "launch",
       "program": "${workspaceRoot}/target/debug/chibicc-rs",
       "args": [
-        "int main() { return \\\"\\xA5\\\"[0]; }"
+        "tmp.c"
       ],
       "stopAtEntry": false,
-      "cwd": "${fileDirname}",
+      "cwd": "${workspaceFolder}",
       "environment": [
         //{"name": "RUST_BACKTRACE", "value": "1"}
       ],

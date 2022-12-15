@@ -2,12 +2,10 @@ use std::cell::RefCell;
 
 use std::rc::Rc;
 
-use crate::lexer::{Token, TokenKind};
-use crate::errors::ErrorReporting;
+use crate::{lexer::{Token, TokenKind}, context::{AsciiStr, Context}};
 
 pub type P<A> = Box<A>;
 pub type SP<A> = Rc<RefCell<A>>;
-pub type AsciiStr = Vec<u8>;
 
 #[derive(Debug)]
 pub enum TyKind {
@@ -128,7 +126,7 @@ pub type StmtNode = Node<StmtKind>;
 pub type SourceUnit = Vec<SP<Binding>>;
 
 pub struct Parser<'a> {
-    src: &'a [u8],
+    ctx: &'a Context,
     toks: &'a [Token],
     tok_index: usize,
     local_vars: Vec<SP<Binding>>,
@@ -136,17 +134,13 @@ pub struct Parser<'a> {
     next_unique_id: u64,
 }
 
-impl<'a> ErrorReporting for Parser<'a> {
-    fn src(&self) -> &[u8] { self.src }
-}
-
 impl<'a> Parser<'a> {
-    pub fn new(src: &'a [u8], toks: &'a [Token]) -> Self {
+    pub fn new(ctx: &'a Context, toks: &'a [Token]) -> Self {
         if toks.is_empty() {
             panic!("Empty token array")
         }
         Self {
-            src,
+            ctx,
             toks,
             tok_index: 0,
             local_vars: Vec::new(),
@@ -384,7 +378,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 (self.type_suffix(ty), name)
             },
-            _ => self.error_tok(self.peek(), "expected a variable name")
+            _ => self.ctx.error_tok(self.peek(), "expected a variable name")
         };
 
         //println!("# DECL {}: {:?}", String::from_utf8_lossy(&decl.1), decl.0);
@@ -589,7 +583,7 @@ impl<'a> Parser<'a> {
             return synth_add(lhs, P::new(rhs), offset)
         }
 
-        self.error_at(offset, "invalid operands");
+        self.ctx.error_at(offset, "invalid operands");
     }
 
     fn sub_overload(&self, lhs: P<ExprNode>, rhs: P<ExprNode>, offset: usize) -> ExprNode {
@@ -612,7 +606,7 @@ impl<'a> Parser<'a> {
             return synth_div(P::new(sub), P::new(synth_num(size, offset)), offset);
         }
 
-        self.error_at(offset, "invalid operands");
+        self.ctx.error_at(offset, "invalid operands");
     }
 
     // mul = unary ("*" unary | "/" unary)*
@@ -755,7 +749,7 @@ impl<'a> Parser<'a> {
                     return expr;
                 }
                 else {
-                    self.error_at(offset, "undefined variable");
+                    self.ctx.error_at(offset, "undefined variable");
                 }
             }
             TokenKind::Punct =>
@@ -771,11 +765,11 @@ impl<'a> Parser<'a> {
                                     exp.ty.clone()
                                 }
                                 else {
-                                    self.error_at(offset, "the last statement in a statement expression must be an expression");
+                                    self.ctx.error_at(offset, "the last statement in a statement expression must be an expression");
                                 }
                             }
                             else {
-                                self.error_at(offset, "statement expression cannot be empty");
+                                self.ctx.error_at(offset, "statement expression cannot be empty");
                             }
                         }
                         else {
@@ -796,7 +790,7 @@ impl<'a> Parser<'a> {
                 },
             _ => {}
         };
-        self.error_tok(self.peek(), "expected an expression");
+        self.ctx.error_tok(self.peek(), "expected an expression");
     }
 
     // funcall = ident "(" (assign ("," assign)*)? ")"
@@ -839,11 +833,11 @@ impl<'a> Parser<'a> {
             self.advance();
             return val
         }
-        self.error_tok(self.peek(), "expected a number");
+        self.ctx.error_tok(self.peek(), "expected a number");
     }
 
     fn tok_source(&self, tok: &Token) -> &[u8] {
-        &self.src[tok.offset..(tok.offset + tok.length)]
+        &self.ctx.src[tok.offset..(tok.offset + tok.length)]
     }
 
     fn peek_is(&self, s: &str) -> bool {
@@ -856,7 +850,7 @@ impl<'a> Parser<'a> {
 
     fn skip(&mut self, s: &str) -> &Token {
         if !self.peek_is(s) {
-            self.error_tok(self.peek(), &format!("Expected {}", s));
+            self.ctx.error_tok(self.peek(), &format!("Expected {}", s));
         }
         self.advance()
     }
@@ -870,14 +864,14 @@ impl<'a> Parser<'a> {
 
     pub fn ensure_done(&self) {
         if !self.is_done() {
-            self.error_tok(self.peek(), "extra token")
+            self.ctx.error_tok(self.peek(), "extra token")
         }
     }
 
     fn synth_deref(&self, expr: P<ExprNode>, offset: usize) -> ExprNode {
         let base_ty = get_base_ty(&expr.ty);
         let ty = match base_ty {
-            None => self.error_at(offset, "invalid pointer dereference"),
+            None => self.ctx.error_at(offset, "invalid pointer dereference"),
             Some(base_ty) => base_ty.clone()
         };
         ExprNode { kind: ExprKind::Deref(expr), offset, ty }
@@ -891,7 +885,7 @@ impl<'a> Parser<'a> {
 
     #[allow(dead_code)]
     fn src_rest(&self) -> std::borrow::Cow<str> {
-        String::from_utf8_lossy(&self.src[self.peek().offset..])
+        String::from_utf8_lossy(&self.ctx.src[self.peek().offset..])
     }
 }
 

@@ -1,5 +1,4 @@
-use crate::errors::ErrorReporting;
-use crate::parser::{Binding, BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty};
+use crate::{parser::{Binding, BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty}, context::Context};
 
 const ARG_REGS8: [&str;6] = [
     "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"
@@ -31,24 +30,20 @@ fn update_stack_info(node: &mut Binding) {
 }
 
 pub struct Codegen<'a> {
-    src: &'a [u8],
+    ctx: &'a Context,
     su: SourceUnit,
     depth: i64,
     id_count: usize,
     cur_ret_lbl: Option<String>
 }
 
-impl<'a> ErrorReporting for Codegen<'a> {
-    fn src(&self) -> &[u8] { self.src }
-}
-
 impl<'a> Codegen<'a> {
-    pub fn new(src: &'a [u8], su: SourceUnit) -> Self {
+    pub fn new(ctx: &'a Context, su: SourceUnit) -> Self {
         for decl in &su {
             update_stack_info(&mut decl.borrow_mut());
         }
         Self {
-            src,
+            ctx,
             su,
             depth: 0,
             id_count: 0,
@@ -355,7 +350,7 @@ impl<'a> Codegen<'a> {
             ExprKind::Deref(expr) => {
                 self.expr(expr);
             }
-            _ => self.error_at(expr.offset, "not an lvalue")
+            _ => self.ctx.error_at(expr.offset, "not an lvalue")
         };
     }
 

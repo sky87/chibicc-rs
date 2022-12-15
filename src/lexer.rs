@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{errors::ErrorReporting, parser::AsciiStr};
+use crate::context::{Context, AsciiStr};
 
 #[derive(Debug)]
 pub enum TokenKind {
@@ -32,22 +32,18 @@ lazy_static! {
 }
 
 pub struct Lexer<'a> {
-    src: &'a [u8]
-}
-
-impl<'a> ErrorReporting for Lexer<'a> {
-    fn src(&self) -> &[u8] { self.src }
+    ctx: &'a Context,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(src: &'a [u8]) -> Self {
-        Self { src }
+    pub fn new(ctx: &'a Context) -> Self {
+        Self { ctx }
     }
 
     pub fn tokenize(&mut self) -> Vec<Token> {
         let mut toks = Vec::new();
         let mut offset = 0;
-        let src = self.src;
+        let src = &self.ctx.src;
 
         while src[offset] != 0 {
             let c = src[offset];
@@ -58,7 +54,7 @@ impl<'a> Lexer<'a> {
             else if c.is_ascii_digit() {
                 let (val, count) = read_int(&src[offset..]);
                 if count == 0 {
-                    self.error_at(offset, "expected number")
+                    self.ctx.error_at(offset, "expected number")
                 }
                 toks.push(Token {
                     offset,
@@ -93,7 +89,7 @@ impl<'a> Lexer<'a> {
                 let mut str = Vec::new();
                 while src[offset] != b'"' {
                     if src[offset] == b'\n' || src[offset] == 0 {
-                        self.error_at(start_offset, "unclosed literal string");
+                        self.ctx.error_at(start_offset, "unclosed literal string");
                     }
 
                     if src[offset] == b'\\' {
@@ -127,7 +123,7 @@ impl<'a> Lexer<'a> {
                     offset += punct_len;
                 }
                 else {
-                    self.error_at(offset, "invalid token");
+                    self.ctx.error_at(offset, "invalid token");
                 }
             }
         }
@@ -151,7 +147,7 @@ impl<'a> Lexer<'a> {
 
         if buf[0] == b'x' {
             if !buf[1].is_ascii_hexdigit() {
-                self.error_at(error_offset, "invalid hex escape sequence");
+                self.ctx.error_at(error_offset, "invalid hex escape sequence");
             }
             let mut hex = 0;
             let mut len = 1;
