@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use crate::{parser::{Binding, BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty}, context::Context};
 
 const ARG_REGS8: [&str;6] = [
@@ -31,6 +33,7 @@ fn update_stack_info(node: &mut Binding) {
 
 pub struct Codegen<'a> {
     ctx: &'a Context,
+    out: &'a mut dyn Write,
     su: SourceUnit,
     depth: i64,
     id_count: usize,
@@ -38,12 +41,13 @@ pub struct Codegen<'a> {
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(ctx: &'a Context, su: SourceUnit) -> Self {
+    pub fn new(ctx: &'a Context, out: &'a mut dyn Write, su: SourceUnit) -> Self {
         for decl in &su {
             update_stack_info(&mut decl.borrow_mut());
         }
         Self {
             ctx,
+            out,
             su,
             depth: 0,
             id_count: 0,
@@ -51,42 +55,62 @@ impl<'a> Codegen<'a> {
         }
     }
 
+    // TODO this with format! is ugly AF
+    // using writeln! requires an .unwrap() on every call, also ugly
+    // Ideally we have a macro version of what we would do with a vararg in C
+    pub fn wln(&mut self, s: &str) {
+        self.w(s);
+        self.nl();
+    }
+
+    pub fn w(&mut self, s: &str) {
+        self.out.write_all(s.as_bytes()).unwrap();
+    }
+
+    pub fn nl(&mut self) {
+        self.out.write_all(&[b'\n']).unwrap();
+    }
+
     pub fn program(&mut self) {
         self.data_sections();
         self.text_section();
     }
 
-    fn data_sections(&self) {
-        for binding in &self.su {
+    fn data_sections(&mut self) {
+        let len = self.su.len();
+        // TODO The loopy ugliness is strong in this one
+        // what one doesn't do to please the borrow checker...
+        for ix in 0..len {
+            let binding = self.su[ix].clone();
             let binding = binding.borrow();
             if let BindingKind::GlobalVar { init_data } = &binding.kind {
                 let name = String::from_utf8_lossy(&binding.name);
-                println!("  .data");
-                println!("  .globl {}", name);
-                println!("{}:", name);
+                self.wln("  .data");
+                self.wln(&format!("  .globl {}", name));
+                self.wln(&format!("{}:", name));
                 if let Some(init_data) = init_data {
-                    print!("  .byte ");
+                    self.w("  .byte ");
                     let mut it = init_data.iter().peekable();
                     while let Some(b) = it.next() {
                         if it.peek().is_none() {
-                            println!("{}", b);
+                            self.wln(&format!("{}", b));
                         }
                         else {
-                            print!("{},", b);
+                            self.w(&format!("{},", b));
                         }
                     }
                 }
                 else {
-                    println!("  .zero {}", binding.ty.size);
+                    self.wln(&format!("  .zero {}", binding.ty.size));
                 }
             }
         }
     }
 
     fn text_section(&mut self) {
-        // This still sucks... just less than before
-        println!();
-        println!("  .text");
+        // TODO This loop still sucks too
+        self.nl();
+        self.wln("  .text");
         for i in 0..self.su.len() {
             let decl = self.su[i].clone();
             let decl = decl.borrow();
@@ -100,30 +124,30 @@ impl<'a> Codegen<'a> {
                 let ret_lbl = format!(".L.return.{}", name);
                 self.cur_ret_lbl = Some(ret_lbl);
 
-                println!();
-                println!("  .globl {}", name);
+                self.nl();
+                self.wln(&format!("  .globl {}", name));
                 for local in locals {
                     let local = local.borrow();
                     if let BindingKind::LocalVar { stack_offset } = local.kind {
-                        println!("# var {} offset {}", String::from_utf8_lossy(&local.name), stack_offset);
+                        self.wln(&format!("# var {} offset {}", String::from_utf8_lossy(&local.name), stack_offset));
                     }
                 }
-                println!("{}:", name);
+                self.wln(&format!("{}:", name));
 
                 // Prologue
-                println!("  push %rbp");
-                println!("  mov %rsp, %rbp");
-                println!("  sub ${}, %rsp", stack_size);
-                println!();
+                self.wln("  push %rbp");
+                self.wln("  mov %rsp, %rbp");
+                self.wln(&format!("  sub ${}, %rsp", stack_size));
+                self.nl();
 
                 for (i, param) in params.iter().enumerate() {
                     let param = param.borrow();
                     if let BindingKind::LocalVar { stack_offset } = param.kind {
                         if param.ty.size == 1 {
-                            println!("  mov {}, {}(%rbp)", ARG_REGS8[i], stack_offset);
+                            self.wln(&format!("  mov {}, {}(%rbp)", ARG_REGS8[i], stack_offset));
                         }
                         else {
-                            println!("  mov {}, {}(%rbp)", ARG_REGS64[i], stack_offset);
+                            self.wln(&format!("  mov {}, {}(%rbp)", ARG_REGS64[i], stack_offset));
                         }
                     }
                 }
@@ -131,12 +155,12 @@ impl<'a> Codegen<'a> {
                 self.stmt(&body);
                 self.sanity_checks();
 
-                println!();
-                println!("{}:", self.cur_ret_lbl.as_ref().unwrap());
-                println!("  mov %rbp, %rsp");
-                println!("  pop %rbp");
-                println!("  ret");
-                println!();
+                self.nl();
+                self.wln(&format!("{}:", self.cur_ret_lbl.as_ref().unwrap()));
+                self.wln("  mov %rbp, %rsp");
+                self.wln("  pop %rbp");
+                self.wln("  ret");
+                self.nl();
             };
         }
     }
@@ -147,7 +171,7 @@ impl<'a> Codegen<'a> {
             StmtKind::Return(ref expr) => {
                 self.expr(expr);
                 let ret_lbl = self.cur_ret_lbl.as_ref().unwrap();
-                println!("  jmp {}", ret_lbl);
+                self.wln(&format!("  jmp {}", ret_lbl));
             },
             StmtKind::Block(ref stmts) => {
                 for stmt in stmts {
@@ -157,43 +181,43 @@ impl<'a> Codegen<'a> {
             StmtKind::If(ref cond, ref then_stmt, ref else_stmt) => {
                 let id = self.next_id();
                 self.expr(cond);
-                println!("  cmp $0, %rax");
-                println!("  je .L.else.{}", id);
+                self.wln("  cmp $0, %rax");
+                self.wln(&format!("  je .L.else.{}", id));
                 self.stmt(then_stmt);
-                println!("  jmp .L.end.{}", id);
-                println!(".L.else.{}:", id);
+                self.wln(&format!("  jmp .L.end.{}", id));
+                self.wln(&format!(".L.else.{}:", id));
                 if let Some(else_stmt) = else_stmt {
                     self.stmt(else_stmt);
                 }
-                println!(".L.end.{}:", id);
+                self.wln(&format!(".L.end.{}:", id));
             },
             StmtKind::For(ref init, ref cond, ref inc, ref body) => {
                 let id = self.next_id();
                 if let Some(init) = init {
                     self.stmt(init);
                 }
-                println!(".L.begin.{}:", id);
+                self.wln(&format!(".L.begin.{}:", id));
                 if let Some(cond) = cond {
                     self.expr(cond);
-                    println!("  cmp $0, %rax");
-                    println!("  je .L.end.{}", id);
+                    self.wln("  cmp $0, %rax");
+                    self.wln(&format!("  je .L.end.{}", id));
                 }
                 self.stmt(body);
                 if let Some(inc) = inc {
                     self.expr(inc);
                 }
-                println!("  jmp .L.begin.{}", id);
-                println!(".L.end.{}:", id);
+                self.wln(&format!("  jmp .L.begin.{}", id));
+                self.wln(&format!(".L.end.{}:", id));
             },
         }
     }
 
     fn expr(&mut self, node: &ExprNode) {
         match &node.kind {
-            ExprKind::Num(val) => println!("  mov ${}, %rax", val),
+            ExprKind::Num(val) => self.wln(&format!("  mov ${}, %rax", val)),
             ExprKind::Neg(expr) => {
                 self.expr(expr);
-                println!("  neg %rax");
+                self.wln("  neg %rax");
             }
             ExprKind::Var(_) => {
                 self.addr(node);
@@ -207,8 +231,8 @@ impl<'a> Codegen<'a> {
                 for i in (0..args.len()).rev() {
                     self.pop(ARG_REGS64[i]);
                 }
-                println!("  mov $0, %rax");
-                println!("  call {}", String::from_utf8_lossy(name));
+                self.wln("  mov $0, %rax");
+                self.wln(&format!("  call {}", String::from_utf8_lossy(name)));
             }
             ExprKind::Addr(expr) => {
                 self.addr(expr);
@@ -228,65 +252,65 @@ impl<'a> Codegen<'a> {
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
-                println!("  add %rdi, %rax");
+                self.wln("  add %rdi, %rax");
             }
             ExprKind::Sub(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
-                println!("  sub %rdi, %rax");
+                self.wln("  sub %rdi, %rax");
             }
             ExprKind::Mul(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
-                println!("  imul %rdi, %rax");
+                self.wln("  imul %rdi, %rax");
             }
             ExprKind::Div(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
-                println!("  cqo");
-                println!("  idiv %rdi, %rax");
+                self.wln("  cqo");
+                self.wln("  idiv %rdi, %rax");
             }
             ExprKind::Eq(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
-                println!("  cmp %rdi, %rax");
-                println!("  sete %al");
-                println!("  movzb %al, %rax");
+                self.wln("  cmp %rdi, %rax");
+                self.wln("  sete %al");
+                self.wln("  movzb %al, %rax");
             }
             ExprKind::Ne(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
-                println!("  cmp %rdi, %rax");
-                println!("  setne %al");
-                println!("  movzb %al, %rax");
+                self.wln("  cmp %rdi, %rax");
+                self.wln("  setne %al");
+                self.wln("  movzb %al, %rax");
             }
             ExprKind::Le(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
-                println!("  cmp %rdi, %rax");
-                println!("  setle %al");
-                println!("  movzb %al, %rax");
+                self.wln("  cmp %rdi, %rax");
+                self.wln("  setle %al");
+                self.wln("  movzb %al, %rax");
             }
             ExprKind::Lt(lhs, rhs) => {
                 self.expr(rhs.as_ref());
                 self.push();
                 self.expr(lhs.as_ref());
                 self.pop("%rdi");
-                println!("  cmp %rdi, %rax");
-                println!("  setl %al");
-                println!("  movzb %al, %rax");
+                self.wln("  cmp %rdi, %rax");
+                self.wln("  setl %al");
+                self.wln("  movzb %al, %rax");
             }
             ExprKind::StmtExpr(body) => {
                 if let StmtKind::Block(stmts) = &body.kind {
@@ -298,17 +322,17 @@ impl<'a> Codegen<'a> {
         };
     }
 
-    fn load(&self, ty: &Ty) {
-        // println!("LOAD {:?}", ty);
+    fn load(&mut self, ty: &Ty) {
+        // self.w(&format!("LOAD {:?}", ty));
         if let TyKind::Array(_, _) = ty.kind {
             return;
         }
 
         if ty.size == 1 {
-            println!("  movsbq (%rax), %rax");
+            self.wln("  movsbq (%rax), %rax");
         }
         else {
-            println!("  mov (%rax), %rax");
+            self.wln("  mov (%rax), %rax");
         }
     }
 
@@ -316,20 +340,20 @@ impl<'a> Codegen<'a> {
         self.pop("%rdi");
 
         if ty.size == 1 {
-            println!("  mov %al, (%rdi)");
+            self.wln("  mov %al, (%rdi)");
         }
         else {
-            println!("  mov %rax, (%rdi)");
+            self.wln("  mov %rax, (%rdi)");
         }
     }
 
     fn push(&mut self) {
-        println!("  push %rax");
+        self.wln("  push %rax");
         self.depth += 1;
     }
 
     fn pop(&mut self, arg: &str) {
-        println!("  pop {}", arg);
+        self.wln(&format!("  pop {}", arg));
         self.depth -= 1;
     }
 
@@ -339,10 +363,10 @@ impl<'a> Codegen<'a> {
                 let data = data.borrow();
                 match &data.kind {
                     BindingKind::LocalVar { stack_offset } => {
-                        println!("  lea {}(%rbp), %rax", stack_offset);
+                        self.wln(&format!("  lea {}(%rbp), %rax", stack_offset));
                     }
                     BindingKind::GlobalVar {..} => {
-                        println!("  lea {}(%rip), %rax", String::from_utf8_lossy(&data.name));
+                        self.wln(&format!("  lea {}(%rip), %rax", String::from_utf8_lossy(&data.name)));
                     }
                     _ => panic!("Unsupported")
                 }

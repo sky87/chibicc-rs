@@ -14,7 +14,7 @@ assert() {
   expected="$1"
   input="$2"
 
-  echo "$input" | ./target/debug/chibicc-rs - > tmp.s || exit
+  echo "$input" | ./target/debug/chibicc-rs -o tmp.s - || exit
   gcc -static -o tmp tmp.s tmp2.o
   ./tmp
   actual="$?"
@@ -220,3 +220,6 @@ assert 3 'int main() { return ({ int x=3; x; }); }'
 rm -f tmp tmp2.o tmp.s
 
 echo OK
+
+echo Test Driver
+bash ./test-driver.sh
