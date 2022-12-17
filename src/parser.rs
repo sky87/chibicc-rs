@@ -129,8 +129,12 @@ pub struct Parser<'a> {
     ctx: &'a Context,
     toks: &'a [Token],
     tok_index: usize,
-    local_vars: Vec<SP<Binding>>,
+
+    scope_lens: Vec<usize>,
+    all_local_vars: Vec<SP<Binding>>,
+    cur_local_vars: Vec<SP<Binding>>,
     global_vars: Vec<SP<Binding>>,
+
     next_unique_id: u64,
 }
 
@@ -143,8 +147,12 @@ impl<'a> Parser<'a> {
             ctx,
             toks,
             tok_index: 0,
-            local_vars: Vec::new(),
+
+            scope_lens: Vec::new(),
+            all_local_vars: Vec::new(),
+            cur_local_vars: Vec::new(),
             global_vars: Vec::new(),
+
             next_unique_id: 0
         }
     }
@@ -197,22 +205,22 @@ impl<'a> Parser<'a> {
         let (ty, _) = self.declarator(base_ty);
 
         self.tok_index = idx;
-        self.local_vars.clear();
+        self.reset_locals();
         matches!(ty.kind, TyKind::Fn(_, _))
     }
 
     fn function(&mut self) {
-        self.local_vars.clear();
+        self.reset_locals();
 
         let offset = self.peek().offset;
         let base_ty = self.declspec();
         let (ty, name) = self.declarator(base_ty);
 
-        let params = self.local_vars.clone();
+        let params = self.all_local_vars.clone();
 
         let body = self.compound_stmt();
         // Reverse them to keep the locals layout in line with chibicc
-        let locals: Vec<SP<Binding>> = self.local_vars.clone().into_iter().rev().collect();
+        let locals: Vec<SP<Binding>> = self.all_local_vars.clone().into_iter().rev().collect();
         self.global_vars.push(Rc::new(RefCell::new(Binding {
             kind: BindingKind::Function(Function {
                 params,
@@ -296,6 +304,9 @@ impl<'a> Parser<'a> {
     fn compound_stmt(&mut self) -> StmtNode {
         let offset = self.skip("{").offset;
         let mut stmts = Vec::new();
+
+        self.enter_scope();
+
         while !self.peek_is("}") {
             if self.peek_is_ty_name() {
                 self.declaration(&mut stmts);
@@ -305,6 +316,10 @@ impl<'a> Parser<'a> {
             }
         }
         self.advance();
+
+
+        self.exit_scope();
+
         StmtNode { kind: StmtKind::Block(stmts), offset, ty: Ty::unit() }
     }
 
@@ -331,7 +346,7 @@ impl<'a> Parser<'a> {
                 ty: ty.clone(),
                 offset
             }));
-            self.local_vars.push(var_data.clone());
+            self.add_local(var_data.clone());
 
             if !self.peek_is("=") {
                 continue;
@@ -416,7 +431,7 @@ impl<'a> Parser<'a> {
             let base_ty = self.declspec();
             let (ty, name) = self.declarator(base_ty);
             params.push(ty.clone());
-            self.local_vars.push(
+            self.add_local(
                 Rc::new(RefCell::new(Binding {
                     kind: BindingKind::LocalVar { stack_offset: -1 },
                     name,
@@ -734,16 +749,7 @@ impl<'a> Parser<'a> {
                 let name = self.tok_source(tok).to_owned();
                 self.advance();
 
-                let mut var_data = self.local_vars.iter().find(|v|
-                    v.borrow().name == name
-                );
-                if let None = var_data {
-                    var_data = self.global_vars.iter().find(|v|
-                        v.borrow().name == name
-                    );
-                }
-
-                if let Some(var_data) = var_data {
+                if let Some(var_data) = self.find_binding(&name) {
                     let ty = var_data.borrow_mut().ty.clone();
                     let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), offset, ty };
                     return expr;
@@ -815,6 +821,37 @@ impl<'a> Parser<'a> {
             offset,
             ty: Ty::int(),
         }
+    }
+
+    fn find_local(&self, name: &[u8]) -> Option<&SP<Binding>> {
+        self.cur_local_vars.iter().rfind(|v| v.borrow().name == name)
+    }
+
+    fn find_global(&self, name: &[u8]) -> Option<&SP<Binding>> {
+        self.global_vars.iter().find(|v| v.borrow().name == name)
+    }
+
+    fn find_binding(&self, name: &[u8]) -> Option<&SP<Binding>> {
+        self.find_local(&name).or_else(|| self.find_global(&name))
+    }
+
+    fn reset_locals(&mut self) {
+        self.all_local_vars.clear();
+        self.cur_local_vars.clear();
+    }
+
+    fn enter_scope(&mut self) {
+        self.scope_lens.push(self.cur_local_vars.len());
+    }
+
+    fn exit_scope(&mut self) {
+        let old_len = self.scope_lens.pop().unwrap();
+        self.cur_local_vars.truncate(old_len);
+    }
+
+    fn add_local(&mut self, binding: SP<Binding>) {
+        self.all_local_vars.push(binding.clone());
+        self.cur_local_vars.push(binding);
     }
 
     fn peek(&self) -> &Token { &self.toks[self.tok_index] }
