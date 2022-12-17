@@ -112,6 +112,23 @@ impl<'a> Lexer<'a> {
                     kind: TokenKind::Str(str),
                 });
             }
+            else if src[offset..].starts_with("//".as_bytes()) {
+                offset += 2;
+                while src[offset] != b'\n' && src[offset] != 0 {
+                    offset += 1;
+                }
+            }
+            else if src[offset..].starts_with("/*".as_bytes()) {
+                let start_offset = offset;
+                offset += 2;
+                while !src[offset..].starts_with("*/".as_bytes()) {
+                    if src[offset] == 0 {
+                        self.ctx.error_at(start_offset, "unclocked block comment");
+                    }
+                    offset += 1;
+                }
+                offset += 2;
+            }
             else {
                 let punct_len = read_punct(&src[offset..]);
                 if punct_len > 0 {
