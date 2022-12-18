@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use crate::{parser::{Binding, BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty}, context::Context};
+use crate::{parser::{Binding, BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty}, context::{Context, ascii}};
 
 const ARG_REGS8: [&str;6] = [
     "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"
@@ -84,7 +84,7 @@ impl<'a> Codegen<'a> {
             let binding = self.su[ix].clone();
             let binding = binding.borrow();
             if let BindingKind::GlobalVar { init_data } = &binding.kind {
-                let name = String::from_utf8_lossy(&binding.name);
+                let name = ascii(&binding.name);
                 wln!(self, "  .data");
                 wln!(self, "  .globl {}", name);
                 wln!(self, "{}:", name);
@@ -120,7 +120,7 @@ impl<'a> Codegen<'a> {
                 ref body,
                 stack_size
             }) = decl.kind {
-                let name = String::from_utf8_lossy(&decl.name);
+                let name = ascii(&decl.name);
                 let ret_lbl = format!(".L.return.{}", name);
                 self.cur_ret_lbl = Some(ret_lbl);
 
@@ -129,7 +129,7 @@ impl<'a> Codegen<'a> {
                 for local in locals {
                     let local = local.borrow();
                     if let BindingKind::LocalVar { stack_offset } = local.kind {
-                        wln!(self, "# var {} offset {}", String::from_utf8_lossy(&local.name), stack_offset);
+                        wln!(self, "# var {} offset {}", ascii(&local.name), stack_offset);
                     }
                 }
                 wln!(self, "{}:", name);
@@ -232,7 +232,7 @@ impl<'a> Codegen<'a> {
                     self.pop(ARG_REGS64[i]);
                 }
                 wln!(self, "  mov $0, %rax");
-                wln!(self, "  call {}", String::from_utf8_lossy(name));
+                wln!(self, "  call {}", ascii(name));
             }
             ExprKind::Addr(expr) => {
                 self.addr(expr);
@@ -365,7 +365,7 @@ impl<'a> Codegen<'a> {
                         wln!(self, "  lea {}(%rbp), %rax", stack_offset);
                     }
                     BindingKind::GlobalVar {..} => {
-                        wln!(self, "  lea {}(%rip), %rax", String::from_utf8_lossy(&data.name));
+                        wln!(self, "  lea {}(%rip), %rax", ascii(&data.name));
                     }
                     _ => panic!("Unsupported")
                 }
@@ -373,7 +373,7 @@ impl<'a> Codegen<'a> {
             ExprKind::Deref(expr) => {
                 self.expr(expr);
             }
-            _ => self.ctx.error_at(expr.offset, "not an lvalue")
+            _ => self.ctx.error_at(&expr.loc, "not an lvalue")
         };
     }
 

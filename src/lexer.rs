@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet};
 
 use crate::context::{Context, AsciiStr};
 
@@ -12,9 +12,16 @@ pub enum TokenKind {
     Eof
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SourceLocation {
+    pub offset: usize,
+    pub line: u32,
+    pub column: u32
+}
+
 #[derive(Debug)]
 pub struct Token {
-    pub offset: usize,
+    pub loc: SourceLocation,
     pub length: usize,
     pub kind: TokenKind
 }
@@ -33,123 +40,178 @@ lazy_static! {
 
 pub struct Lexer<'a> {
     ctx: &'a Context,
+    offset: usize,
+    line: u32,
+    column: u32,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(ctx: &'a Context) -> Self {
-        Self { ctx }
+        Self { ctx, offset: 0, line: 1, column: 1 }
+    }
+
+    pub fn advance(&mut self) {
+        if self.ctx.src[self.offset] == b'\n' {
+            self.line += 1;
+            self.column = 0;
+        }
+        self.offset += 1;
+        self.column += 1;
+    }
+
+    pub fn nadvance(&mut self, n: usize) {
+        for _ in 0..n {
+            self.advance()
+        }
+    }
+
+    pub fn peek(&self) -> u8 {
+        self.ctx.src[self.offset]
+    }
+
+    pub fn rest(&self) -> &[u8] {
+        &self.ctx.src[self.offset..]
+    }
+
+    pub fn starts_with(&self, s: &str) -> bool {
+        self.rest().starts_with(s.as_bytes())
+    }
+
+    pub fn loc(&self) -> SourceLocation {
+        SourceLocation { offset: self.offset, line: self.line, column: self.column }
+    }
+
+    pub fn len(&self, start_loc: &SourceLocation) -> usize {
+        self.offset - start_loc.offset
     }
 
     pub fn tokenize(&mut self) -> Vec<Token> {
         let mut toks = Vec::new();
-        let mut offset = 0;
-        let src = &self.ctx.src;
 
-        while src[offset] != 0 {
-            let c = src[offset];
-
-            if c.is_ascii_whitespace() {
-                offset += 1;
-            }
-            else if c.is_ascii_digit() {
-                let (val, count) = read_int(&src[offset..]);
-                if count == 0 {
-                    self.ctx.error_at(offset, "expected number")
-                }
-                toks.push(Token {
-                    offset,
-                    length: count,
-                    kind: TokenKind::Num(val),
-                });
-                offset += count;
-            }
-            else if is_ident_start(c) {
-                let start_offset = offset;
-                loop {
-                    offset += 1;
-                    if !is_ident_cont(src[offset]) { break; }
-                }
-                let name = &src[start_offset..offset];
-                let kind = if KEYWORDS.contains(&name) {
-                    TokenKind::Keyword
-                }
-                else {
-                    TokenKind::Ident
-                };
-                toks.push(Token {
-                    offset: start_offset,
-                    length: offset - start_offset,
-                    kind,
-                });
-            }
-            else if c == b'"' {
-                let start_offset = offset;
-                offset += 1;
-
-                let mut str = Vec::new();
-                while src[offset] != b'"' {
-                    if src[offset] == b'\n' || src[offset] == 0 {
-                        self.ctx.error_at(start_offset, "unclosed literal string");
-                    }
-
-                    if src[offset] == b'\\' {
-                        offset += 1;
-                        let (c, len) = self.read_escaped_char(&src[offset..], offset - 1);
-                        str.push(c);
-                        offset += len;
-                    }
-                    else {
-                        str.push(src[offset]);
-                        offset += 1;
-                    }
-                }
-                offset += 1;
-                str.push(0);
-
-                toks.push(Token {
-                    offset: start_offset,
-                    length: offset - start_offset,
-                    kind: TokenKind::Str(str),
-                });
-            }
-            else if src[offset..].starts_with("//".as_bytes()) {
-                offset += 2;
-                while src[offset] != b'\n' && src[offset] != 0 {
-                    offset += 1;
-                }
-            }
-            else if src[offset..].starts_with("/*".as_bytes()) {
-                let start_offset = offset;
-                offset += 2;
-                while !src[offset..].starts_with("*/".as_bytes()) {
-                    if src[offset] == 0 {
-                        self.ctx.error_at(start_offset, "unclocked block comment");
-                    }
-                    offset += 1;
-                }
-                offset += 2;
-            }
-            else {
-                let punct_len = read_punct(&src[offset..]);
-                if punct_len > 0 {
-                    toks.push(Token {
-                        offset,
-                        length: punct_len,
-                        kind: TokenKind::Punct,
-                    });
-                    offset += punct_len;
-                }
-                else {
-                    self.ctx.error_at(offset, "invalid token");
-                }
-            }
+        loop {
+            while self.consume_ws_and_comments() {}
+            if self.peek() == 0 { break; }
+            toks.push(self.next());
         }
 
-        toks.push(Token { offset, length: 0, kind: TokenKind::Eof });
+        toks.push(Token { loc: self.loc(), length: 0, kind: TokenKind::Eof });
         toks
     }
 
-    fn read_escaped_char(&self, buf: &[u8], error_offset: usize) -> (u8, usize) {
+    fn next(&mut self) -> Token {
+        let c = self.peek();
+
+        let loc = self.loc();
+
+        if c.is_ascii_digit() {
+            let (val, count) = read_int(self.rest());
+            if count == 0 {
+                self.ctx.error_at(&loc, "expected number")
+            }
+            self.nadvance(count);
+            return Token {
+                loc,
+                length: count,
+                kind: TokenKind::Num(val),
+            };
+        }
+        else if is_ident_start(c) {
+            loop {
+                self.advance();
+                if !is_ident_cont(self.peek()) { break; }
+            }
+            let name = &self.ctx.src[loc.offset..self.offset];
+            let kind = if KEYWORDS.contains(&name) {
+                TokenKind::Keyword
+            }
+            else {
+                TokenKind::Ident
+            };
+            return Token {
+                loc,
+                length: name.len(),
+                kind,
+            };
+        }
+        else if c == b'"' {
+            self.advance();
+
+            let mut str = Vec::new();
+            while self.peek() != b'"' {
+                if self.peek() == b'\n' || self.peek() == 0 {
+                    self.ctx.error_at(&loc, "unclosed literal string");
+                }
+
+                if self.peek() == b'\\' {
+                    let escape_loc = self.loc(); // wastefull...
+                    self.advance();
+                    let (c, len) = self.read_escaped_char(self.rest(), &escape_loc);
+                    str.push(c);
+                    self.nadvance(len);
+                }
+                else {
+                    str.push(self.peek());
+                    self.advance();
+                }
+            }
+            self.advance();
+            str.push(0);
+
+            return Token {
+                loc,
+                length: self.len(&loc),
+                kind: TokenKind::Str(str),
+            };
+        }
+        else {
+            let punct_len = read_punct(self.rest());
+            if punct_len > 0 {
+                self.nadvance(punct_len);
+                return Token {
+                    loc,
+                    length: punct_len,
+                    kind: TokenKind::Punct,
+                };
+            }
+            else {
+                self.ctx.error_at(&loc, "invalid token");
+            }
+        }
+    }
+
+    fn consume_ws_and_comments(&mut self) -> bool {
+        if self.peek().is_ascii_whitespace() {
+            while self.peek().is_ascii_whitespace() {
+                self.advance();
+            }
+            return true;
+        }
+
+        if self.starts_with("//") {
+            self.nadvance(2);
+            while self.peek() != b'\n' && self.peek() != 0 {
+                self.advance();
+            }
+            return true;
+        }
+
+        if self.starts_with("/*") {
+            let loc = self.loc();
+            self.nadvance(2);
+            while !self.starts_with("*/") {
+                if self.peek() == 0 {
+                    self.ctx.error_at(&loc, "unclosed block comment");
+                }
+                self.advance();
+            }
+            self.nadvance(2);
+            return true;
+        }
+
+        false
+    }
+
+    fn read_escaped_char(&self, buf: &[u8], escape_loc: &SourceLocation) -> (u8, usize) {
         let mut oct = 0;
         let mut len = 0;
         while (len < 3 && len < buf.len()) &&
@@ -164,7 +226,7 @@ impl<'a> Lexer<'a> {
 
         if buf[0] == b'x' {
             if !buf[1].is_ascii_hexdigit() {
-                self.ctx.error_at(error_offset, "invalid hex escape sequence");
+                self.ctx.error_at(escape_loc, "invalid hex escape sequence");
             }
             let mut hex = 0;
             let mut len = 1;
