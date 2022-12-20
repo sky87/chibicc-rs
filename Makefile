@@ -13,7 +13,8 @@ $(BIN): $(SRCS)
 
 $(TESTS_BUILD_DIR)/%: $(BIN) test/%.c
 	@mkdir -p $(TESTS_BUILD_DIR)
-	$(CC) -o- -E -P -C test/$*.c | $(BIN) -o $(TESTS_BUILD_DIR)/$*.s -
+	$(CC) -o $(TESTS_BUILD_DIR)/$*.p.c -E -P -C test/$*.c
+	$(BIN) -o $(TESTS_BUILD_DIR)/$*.s $(TESTS_BUILD_DIR)/$*.p.c
 	$(CC) -o $@ $(TESTS_BUILD_DIR)/$*.s -xc test/common
 
 test: $(TESTS)

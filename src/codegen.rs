@@ -133,6 +133,7 @@ impl<'a> Codegen<'a> {
                     }
                 }
                 wln!(self, "{}:", name);
+                wln!(self, ".loc 1 {} {}", body.loc.line, body.loc.column);
 
                 // Prologue
                 wln!(self, "  push %rbp");
@@ -166,6 +167,7 @@ impl<'a> Codegen<'a> {
     }
 
     fn stmt(&mut self, node: &StmtNode) {
+        wln!(self, "  .loc 1 {} {}", node.loc.line, node.loc.column);
         match node.kind {
             StmtKind::Expr(ref expr) => self.expr(expr),
             StmtKind::Return(ref expr) => {
@@ -213,6 +215,7 @@ impl<'a> Codegen<'a> {
     }
 
     fn expr(&mut self, node: &ExprNode) {
+        wln!(self, "  .loc 1 {} {}", node.loc.line, node.loc.column);
         match &node.kind {
             ExprKind::Num(val) => wln!(self, "  mov ${}, %rax", val),
             ExprKind::Neg(expr) => {

@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
 
-use std::{env, fs::{read, File}, io::{stdin, Read}, process::exit};
+use std::{env, fs::{read, File}, io::{stdin, Write, Read}, process::exit};
 
 use context::Context;
 
@@ -90,6 +90,8 @@ fn main() {
     parser.ensure_done();
 
     let mut out = File::create(out_filename).unwrap();
+
+    writeln!(out, ".file 1 \"{}\"", in_filename).unwrap();
 
     let mut codegen = Codegen::new(&ctx, &mut out, su);
     codegen.program();
