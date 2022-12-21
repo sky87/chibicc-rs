@@ -107,6 +107,7 @@ pub enum ExprKind {
     Lt(P<ExprNode>, P<ExprNode>),
     Le(P<ExprNode>, P<ExprNode>),
 
+    Comma(Vec<P<ExprNode>>),
     StmtExpr(P<StmtNode>),
 
     Assign(P<ExprNode>, P<ExprNode>),
@@ -457,9 +458,26 @@ impl<'a> Parser<'a> {
         StmtNode { kind: StmtKind::Expr(expr), loc: loc, ty: Ty::unit() }
     }
 
-    // expr = assign
+    // expr = assign ("," expr)?
     fn expr(&mut self) -> ExprNode {
-        self.assign()
+        let loc = self.peek().loc;
+        let node = self.assign();
+        if !self.peek_is(",") {
+            return node;
+        }
+        let mut exprs = Vec::new();
+        exprs.push(P::new(node));
+        while self.peek_is(",") {
+            self.advance();
+            exprs.push(P::new(self.assign()));
+        }
+
+        let ty = exprs.last().unwrap().ty.clone();
+        ExprNode {
+            kind: ExprKind::Comma(exprs),
+            loc,
+            ty,
+        }
     }
 
     // assign = equality ("=" assign)?

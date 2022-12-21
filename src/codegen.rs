@@ -315,6 +315,11 @@ impl<'a> Codegen<'a> {
                 wln!(self, "  setl %al");
                 wln!(self, "  movzb %al, %rax");
             }
+            ExprKind::Comma(exprs) => {
+                for expr in exprs {
+                    self.expr(expr);
+                }
+            }
             ExprKind::StmtExpr(body) => {
                 if let StmtKind::Block(stmts) = &body.kind {
                     for stmt in stmts {
@@ -375,6 +380,17 @@ impl<'a> Codegen<'a> {
             },
             ExprKind::Deref(expr) => {
                 self.expr(expr);
+            },
+            ExprKind::Comma(exprs) => {
+                let mut it = exprs.iter().peekable();
+                while let Some(expr) = it.next() {
+                    if it.peek().is_none() {
+                        self.addr(expr);
+                    }
+                    else {
+                        self.expr(expr);
+                    }
+                }
             }
             _ => self.ctx.error_at(&expr.loc, "not an lvalue")
         };
