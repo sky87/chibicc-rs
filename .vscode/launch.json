@@ -10,7 +10,7 @@
       "request": "launch",
       "program": "${workspaceRoot}/target/debug/chibicc-rs",
       "args": [
-        "target/tests-c/control.p.c",
+        "target/tests-c/struct.p.c",
         "-otmp.s",
       ],
       "stopAtEntry": false,

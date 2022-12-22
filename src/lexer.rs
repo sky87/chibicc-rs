@@ -33,7 +33,7 @@ lazy_static! {
             "if", "else",
             "for", "while",
             "sizeof",
-            "int", "char"
+            "int", "char", "struct"
         ].map(|k| k.as_bytes()).into()
     };
 }
@@ -285,7 +285,7 @@ fn digit_to_number(digit: u8) -> u8 {
 
 fn ispunct(c: u8) -> bool {
     return c == b';' || c == b'=' || c == b'(' || c == b')' ||
-        c == b'{' || c == b'}' || c == b',' || c == b'[' || c == b']' ||
+        c == b'{' || c == b'}' || c == b',' || c == b'.' || c == b'[' || c == b']' ||
         c == b'+' || c == b'-' || c == b'*' || c == b'/' ||
         c == b'<' || c == b'>' || c == b'&';
 }

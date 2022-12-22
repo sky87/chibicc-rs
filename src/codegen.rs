@@ -226,6 +226,10 @@ impl<'a> Codegen<'a> {
                 self.addr(node);
                 self.load(&node.ty);
             }
+            ExprKind::MemberAccess(_, _) => {
+                self.addr(node);
+                self.load(&node.ty);
+            }
             ExprKind::Funcall(name, args) => {
                 for arg in args {
                     self.expr(arg);
@@ -391,6 +395,10 @@ impl<'a> Codegen<'a> {
                         self.expr(expr);
                     }
                 }
+            },
+            ExprKind::MemberAccess(expr, member) => {
+                self.addr(expr);
+                wln!(self, "  add ${}, %rax", member.offset);
             }
             _ => self.ctx.error_at(&expr.loc, "not an lvalue")
         };

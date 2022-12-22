@@ -14,7 +14,15 @@ pub enum TyKind {
     Ptr(Rc<Ty>),
     Fn(Rc<Ty>, Vec<Rc<Ty>>),
     Array(Rc<Ty>, usize),
+    Struct(Vec<Rc<Member>>),
     Unit
+}
+
+#[derive(Debug)]
+pub struct Member {
+    pub name: AsciiStr,
+    pub ty: Rc<Ty>,
+    pub offset: usize
 }
 
 #[derive(Debug)]
@@ -32,6 +40,10 @@ impl Ty {
     fn array(base: Rc<Ty>, len: usize) -> Rc<Ty> {
         let base_size = base.size;
         Rc::new(Ty { kind: TyKind::Array(base, len), size: base_size*len })
+    }
+    fn strct(members: Vec<Rc<Member>>) -> Rc<Ty> {
+        let size = members.iter().map(|m| m.ty.size).sum();
+        Rc::new(Ty { kind: TyKind::Struct(members), size })
     }
 
     fn is_integer_like(&self) -> bool {
@@ -106,6 +118,8 @@ pub enum ExprKind {
     Ne(P<ExprNode>, P<ExprNode>),
     Lt(P<ExprNode>, P<ExprNode>),
     Le(P<ExprNode>, P<ExprNode>),
+
+    MemberAccess(P<ExprNode>, Rc<Member>),
 
     Comma(Vec<P<ExprNode>>),
     StmtExpr(P<StmtNode>),
@@ -325,7 +339,7 @@ impl<'a> Parser<'a> {
     }
 
     fn peek_is_ty_name(&self) -> bool {
-        self.peek_is("char") || self.peek_is("int")
+        self.peek_is("char") || self.peek_is("int") || self.peek_is("struct")
     }
 
     // declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
@@ -369,15 +383,24 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // declspec = "int" | "char"
+    // declspec = "int" | "char" | "struct" struct-decl
     fn declspec(&mut self) -> Rc<Ty> {
         if self.peek_is("char") {
             self.advance();
             return Ty::char()
         }
 
-        self.skip("int");
-        Ty::int()
+        if self.peek_is("int") {
+            self.advance();
+            return Ty::int();
+        }
+
+        if self.peek_is("struct") {
+            self.advance();
+            return self.struct_decl();
+        }
+
+        self.ctx.error_tok(self.peek(), "typename expected");
     }
 
     // declarator = "*"* ident type-suffix
@@ -443,6 +466,38 @@ impl<'a> Parser<'a> {
         }
         self.skip(")");
         return Ty::func(ret_ty, params);
+    }
+
+    fn struct_decl(&mut self) -> Rc<Ty> {
+        let mut members = Vec::new();
+        let mut offset = 0;
+
+        self.skip("{");
+        while !self.peek_is("}") {
+            let base_ty = self.declspec();
+            let mut i = 0;
+
+            while !self.peek_is(";") {
+                if i > 0 {
+                    self.skip(",");
+                }
+
+                let (ty, name) = self.declarator(base_ty.clone());
+                let size = ty.size;
+                members.push(Rc::new(Member {
+                    name,
+                    ty,
+                    offset,
+                }));
+                offset += size;
+
+                i+= 1;
+            }
+            self.advance(); // ;
+        }
+        self.advance(); // }
+
+        Ty::strct(members)
     }
 
     // expr-stmt = expr? ";"
@@ -707,17 +762,53 @@ impl<'a> Parser<'a> {
         self.postfix()
     }
 
-    // postfix = "primary" ("[" expr "]")*
+    // postfix = "primary" ("[" expr | "." ident "]")*
     fn postfix(&mut self) -> ExprNode {
         let mut node = self.primary();
-        while self.peek_is("[") {
-            let loc = self.advance().loc;
-            let idx = self.expr();
-            self.skip("]");
-            let expr = self.add_overload(P::new(node), P::new(idx), loc);
-            node = self.synth_deref(P::new(expr), loc);
+        loop {
+            if self.peek_is("[") {
+                let loc = self.advance().loc;
+                let idx = self.expr();
+                self.skip("]");
+                let expr = self.add_overload(P::new(node), P::new(idx), loc);
+                node = self.synth_deref(P::new(expr), loc);
+
+                continue;
+            }
+
+            if self.peek_is(".") {
+                self.advance();
+                let loc = self.peek().loc;
+                let name = {
+                    let name_tok = self.peek();
+                    if !matches!(name_tok.kind, TokenKind::Ident) {
+                        self.ctx.error_tok(name_tok, "expected struct member name");
+                    }
+                    self.ctx.tok_source(name_tok)
+                };
+                let members = {
+                    match &node.ty.kind {
+                        TyKind::Struct(members) => members,
+                        _ => self.ctx.error_at(&node.loc, "not a struct"),
+                    }
+                };
+                let member = members.iter().find(|m| m.name == name).unwrap_or_else(||
+                    self.ctx.error_at(&loc, "no such member")
+                ).clone();
+
+                let ty = member.ty.clone();
+                node = ExprNode {
+                    kind: ExprKind::MemberAccess(Box::new(node), member),
+                    loc,
+                    ty,
+                };
+
+                self.advance();
+                continue;
+            }
+
+            return node;
         }
-        node
     }
 
     // primary = "(" "{" stmt+ "}" ")"
