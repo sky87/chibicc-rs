@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{io::Write, ops::{Add, Sub, Div, Mul}, fmt::Display};
 
 use crate::{parser::{Binding, BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty}, context::{Context, ascii}};
 
@@ -416,6 +416,26 @@ impl<'a> Codegen<'a> {
     }
 }
 
-fn align_to(n: i64, align: i64) -> i64 {
-    ((n + align - 1) / align) * align
+pub trait Alignable : Display + Copy + Add<Output=Self> + Sub<Output=Self> + Div<Output=Self> + Mul<Output=Self> {
+    fn one() -> Self;
+    fn is_zero(self) -> bool;
+}
+
+impl Alignable for i64 {
+    fn one() -> Self { 1 }
+    fn is_zero(self) -> bool { return self == 0 }
+}
+
+impl Alignable for usize {
+    fn one() -> Self { 1 }
+    fn is_zero(self) -> bool { return self == 0 }
+}
+
+// Round up `n` to the nearest multiple of `align`. For instance,
+// align_to(5, 8) returns 8 and align_to(11, 8) returns 16.
+pub fn align_to<T: Alignable>(n: T, align: T) -> T {
+    if n.is_zero() {
+        return n;
+    }
+    ((n + align - Alignable::one()) / align) * align
 }

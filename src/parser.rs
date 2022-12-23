@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use std::rc::Rc;
 
-use crate::{lexer::{Token, TokenKind, SourceLocation}, context::{AsciiStr, Context, ascii}};
+use crate::{lexer::{Token, TokenKind, SourceLocation}, context::{AsciiStr, Context, ascii}, codegen::align_to};
 
 pub type P<A> = Box<A>;
 pub type SP<A> = Rc<RefCell<A>>;
@@ -28,22 +28,32 @@ pub struct Member {
 #[derive(Debug)]
 pub struct Ty {
     pub kind: TyKind,
-    pub size: usize
+    pub size: usize,
+    pub align: usize,
 }
 
 impl Ty {
-    fn int() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Int, size: 8 }) }
-    fn char() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Char, size: 1 }) }
-    fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 0 }) }
-    fn ptr(base: Rc<Ty>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Ptr(base), size: 8 }) }
-    fn func(ret: Rc<Ty>, params: Vec<Rc<Ty>>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Fn(ret, params), size: 0 }) }
+    fn int() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Int, size: 8, align: 8 }) }
+    fn char() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Char, size: 1, align: 1 }) }
+    fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 0, align: 0 }) }
+    fn ptr(base: Rc<Ty>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Ptr(base), size: 8, align: 8 }) }
+    fn func(ret: Rc<Ty>, params: Vec<Rc<Ty>>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Fn(ret, params), size: 0, align: 0 }) }
     fn array(base: Rc<Ty>, len: usize) -> Rc<Ty> {
         let base_size = base.size;
-        Rc::new(Ty { kind: TyKind::Array(base, len), size: base_size*len })
+        let base_align = base.align;
+        Rc::new(Ty { kind: TyKind::Array(base, len), size: base_size*len, align: base_align })
     }
     fn strct(members: Vec<Rc<Member>>) -> Rc<Ty> {
-        let size = members.iter().map(|m| m.ty.size).sum();
-        Rc::new(Ty { kind: TyKind::Struct(members), size })
+        let mut size = 0;
+        let mut align = 0;
+        for m in &members {
+            size += m.ty.size;
+            if align < m.ty.align {
+                align = m.ty.align;
+            }
+        }
+        size = align_to(size, align);
+        Rc::new(Ty { kind: TyKind::Struct(members), size, align })
     }
 
     fn is_integer_like(&self) -> bool {
@@ -470,7 +480,7 @@ impl<'a> Parser<'a> {
 
     fn struct_decl(&mut self) -> Rc<Ty> {
         let mut members = Vec::new();
-        let mut offset = 0;
+        let mut offset: usize = 0;
 
         self.skip("{");
         while !self.peek_is("}") {
@@ -484,6 +494,7 @@ impl<'a> Parser<'a> {
 
                 let (ty, name) = self.declarator(base_ty.clone());
                 let size = ty.size;
+                offset = align_to(offset, ty.align);
                 members.push(Rc::new(Member {
                     name,
                     ty,
