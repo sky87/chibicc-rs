@@ -3,6 +3,7 @@ extern crate lazy_static;
 
 use std::{env, fs::{read, File}, io::{stdin, Write, Read}, process::exit};
 
+use codegen::preprocess_source_unit;
 use context::Context;
 
 use crate::{lexer::Lexer, parser::Parser, codegen::Codegen};
@@ -89,11 +90,11 @@ fn main() {
     let su = parser.source_unit();
     parser.ensure_done();
 
+    preprocess_source_unit(&su);
+
     let mut out = File::create(out_filename).unwrap();
-
     writeln!(out, ".file 1 \"{}\"", in_filename).unwrap();
-
-    let mut codegen = Codegen::new(&ctx, &mut out, su);
+    let mut codegen = Codegen::new(&ctx, &mut out, &su);
     codegen.program();
 }
 

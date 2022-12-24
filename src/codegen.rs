@@ -1,6 +1,6 @@
 use std::{io::Write, ops::{Add, Sub, Div, Mul}, fmt::Display};
 
-use crate::{parser::{Binding, BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty}, context::{Context, ascii}};
+use crate::{parser::{BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty}, context::{Context, ascii}};
 
 const ARG_REGS8: [&str;6] = [
     "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"
@@ -9,32 +9,35 @@ const ARG_REGS64: [&str;6] = [
     "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"
 ];
 
-fn update_stack_info(node: &mut Binding) {
-    match node.kind {
-        BindingKind::Function(Function {
-            ref locals,
-            ref mut stack_size,
-            ..
-        }) => {
-            let mut offset: i64 = 0;
-            for local in locals {
-                let mut local = local.borrow_mut();
-                let ty_size: i64 = local.ty.size.try_into().unwrap();
-                if let BindingKind::LocalVar { stack_offset } = &mut local.kind {
-                    offset -= ty_size;
-                    *stack_offset = offset;
+pub fn preprocess_source_unit(su: &SourceUnit) {
+    for decl in su {
+        let mut node = decl.borrow_mut();
+        match node.kind {
+            BindingKind::Function(Function {
+                ref locals,
+                ref mut stack_size,
+                ..
+            }) => {
+                let mut offset: i64 = 0;
+                for local in locals {
+                    let mut local = local.borrow_mut();
+                    let ty_size: i64 = local.ty.size.try_into().unwrap();
+                    if let BindingKind::LocalVar { stack_offset } = &mut local.kind {
+                        offset -= ty_size;
+                        *stack_offset = offset;
+                    }
                 }
+                *stack_size = align_to(-offset, 16);
             }
-            *stack_size = align_to(-offset, 16);
+            _ => {}
         }
-        _ => {}
     }
 }
 
 pub struct Codegen<'a> {
     ctx: &'a Context,
     out: &'a mut dyn Write,
-    su: SourceUnit,
+    su: &'a SourceUnit,
     depth: i64,
     id_count: usize,
     cur_ret_lbl: Option<String>
@@ -57,10 +60,7 @@ macro_rules! w {
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(ctx: &'a Context, out: &'a mut dyn Write, su: SourceUnit) -> Self {
-        for decl in &su {
-            update_stack_info(&mut decl.borrow_mut());
-        }
+    pub fn new(ctx: &'a Context, out: &'a mut dyn Write, su: &'a SourceUnit) -> Self {
         Self {
             ctx,
             out,
@@ -77,11 +77,7 @@ impl<'a> Codegen<'a> {
     }
 
     fn data_sections(&mut self) {
-        let len = self.su.len();
-        // TODO The loopy ugliness is strong in this one
-        // what one doesn't do to please the borrow checker...
-        for ix in 0..len {
-            let binding = self.su[ix].clone();
+        for binding in self.su {
             let binding = binding.borrow();
             if let BindingKind::GlobalVar { init_data } = &binding.kind {
                 let name = ascii(&binding.name);
@@ -108,11 +104,9 @@ impl<'a> Codegen<'a> {
     }
 
     fn text_section(&mut self) {
-        // TODO This loop still sucks too
         wln!(self);
         wln!(self, "  .text");
-        for i in 0..self.su.len() {
-            let decl = self.su[i].clone();
+        for decl in self.su.iter() {
             let decl = decl.borrow();
             if let BindingKind::Function(Function {
                 ref params,
