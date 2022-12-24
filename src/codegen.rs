@@ -22,12 +22,14 @@ pub fn preprocess_source_unit(su: &SourceUnit) {
                 for local in locals {
                     let mut local = local.borrow_mut();
                     let ty_size: i64 = local.ty.size.try_into().unwrap();
+                    let ty_align: i64 = local.ty.align.try_into().unwrap();
                     if let BindingKind::LocalVar { stack_offset } = &mut local.kind {
-                        offset -= ty_size;
-                        *stack_offset = offset;
+                        offset += ty_size;
+                        offset = align_to(offset, ty_align);
+                        *stack_offset = -offset;
                     }
                 }
-                *stack_size = align_to(-offset, 16);
+                *stack_size = align_to(offset, 16);
             }
             _ => {}
         }

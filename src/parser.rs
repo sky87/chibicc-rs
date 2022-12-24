@@ -35,9 +35,9 @@ pub struct Ty {
 impl Ty {
     fn int() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Int, size: 8, align: 8 }) }
     fn char() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Char, size: 1, align: 1 }) }
-    fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 0, align: 0 }) }
+    fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 0, align: 1 }) }
     fn ptr(base: Rc<Ty>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Ptr(base), size: 8, align: 8 }) }
-    fn func(ret: Rc<Ty>, params: Vec<Rc<Ty>>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Fn(ret, params), size: 0, align: 0 }) }
+    fn func(ret: Rc<Ty>, params: Vec<Rc<Ty>>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Fn(ret, params), size: 0, align: 1 }) }
     fn array(base: Rc<Ty>, len: usize) -> Rc<Ty> {
         let base_size = base.size;
         let base_align = base.align;
@@ -45,7 +45,7 @@ impl Ty {
     }
     fn strct(members: Vec<Rc<Member>>) -> Rc<Ty> {
         let mut size = 0;
-        let mut align = 0;
+        let mut align = 1;
         for m in &members {
             size += m.ty.size;
             if align < m.ty.align {
