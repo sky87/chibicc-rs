@@ -270,7 +270,7 @@ impl<'a> Parser<'a> {
             let loc = self.advance().loc;
             let expr = self.expr();
             self.skip(";");
-            return StmtNode { kind: StmtKind::Return(expr), loc: loc, ty: Ty::unit() }
+            return StmtNode { kind: StmtKind::Return(expr), loc, ty: Ty::unit() }
         }
 
         if self.peek_is("if") {
@@ -284,7 +284,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 else_stmt = Some(P::new(self.stmt()));
             }
-            return StmtNode { kind: StmtKind::If(cond, then_stmt, else_stmt), loc: loc, ty: Ty::unit() }
+            return StmtNode { kind: StmtKind::If(cond, then_stmt, else_stmt), loc, ty: Ty::unit() }
         }
 
         if self.peek_is("for") {
@@ -306,7 +306,7 @@ impl<'a> Parser<'a> {
 
             let body = P::new(self.stmt());
 
-            return StmtNode { kind: StmtKind::For(init, cond, inc, body), loc: loc, ty: Ty::unit() }
+            return StmtNode { kind: StmtKind::For(init, cond, inc, body), loc, ty: Ty::unit() }
         }
 
         if self.peek_is("while") {
@@ -315,7 +315,7 @@ impl<'a> Parser<'a> {
             let cond = Some(P::new(self.expr()));
             self.skip(")");
             let body = P::new(self.stmt());
-            return StmtNode { kind: StmtKind::For(None, cond, None, body), loc: loc, ty: Ty::unit() }
+            return StmtNode { kind: StmtKind::For(None, cond, None, body), loc, ty: Ty::unit() }
         }
 
         if self.peek_is("{") {
@@ -345,7 +345,7 @@ impl<'a> Parser<'a> {
 
         self.exit_scope();
 
-        StmtNode { kind: StmtKind::Block(stmts), loc: loc, ty: Ty::unit() }
+        StmtNode { kind: StmtKind::Block(stmts), loc, ty: Ty::unit() }
     }
 
     fn peek_is_ty_name(&self) -> bool {
@@ -378,16 +378,16 @@ impl<'a> Parser<'a> {
             }
 
             self.advance();
-            let lhs = ExprNode { kind: ExprKind::Var(var_data), loc: loc, ty };
+            let lhs = ExprNode { kind: ExprKind::Var(var_data), loc, ty };
             let rhs = self.assign();
             let rhs_ty = rhs.ty.clone();
             stmts.push(StmtNode {
                 kind: StmtKind::Expr(ExprNode {
                     kind: ExprKind::Assign(P::new(lhs), P::new(rhs)),
-                    loc: loc,
+                    loc,
                     ty: rhs_ty,
                 }),
-                loc: loc,
+                loc,
                 ty: Ty::unit()
             });
         }
@@ -515,13 +515,13 @@ impl<'a> Parser<'a> {
     fn expr_stmt(&mut self) -> StmtNode {
         if self.peek_is(";") {
             let loc = self.advance().loc;
-            return StmtNode { kind: StmtKind::Block(Vec::new()), loc: loc, ty: Ty::unit() }
+            return StmtNode { kind: StmtKind::Block(Vec::new()), loc, ty: Ty::unit() }
         }
 
         let expr = self.expr();
         let loc = expr.loc;
         self.skip(";");
-        StmtNode { kind: StmtKind::Expr(expr), loc: loc, ty: Ty::unit() }
+        StmtNode { kind: StmtKind::Expr(expr), loc, ty: Ty::unit() }
     }
 
     // expr = assign ("," expr)?
@@ -555,7 +555,7 @@ impl<'a> Parser<'a> {
             let ty = node.ty.clone();
             node = ExprNode {
                 kind: ExprKind::Assign(P::new(node), rhs),
-                loc: loc,
+                loc,
                 ty
             };
         }
@@ -571,7 +571,7 @@ impl<'a> Parser<'a> {
                 let loc = self.advance().loc;
                 node = ExprNode {
                     kind: ExprKind::Eq(P::new(node), P::new(self.relational())),
-                    loc: loc,
+                    loc,
                     ty: Ty::int()
                 };
             }
@@ -579,7 +579,7 @@ impl<'a> Parser<'a> {
                 let loc = self.advance().loc;
                 node = ExprNode {
                     kind: ExprKind::Ne(P::new(node), P::new(self.relational())),
-                    loc: loc,
+                    loc,
                     ty: Ty::int()
                 };
             }
@@ -600,7 +600,7 @@ impl<'a> Parser<'a> {
                 let loc = self.advance().loc;
                 node = ExprNode {
                     kind: ExprKind::Lt(P::new(node), P::new(self.add())),
-                    loc: loc,
+                    loc,
                     ty: Ty::int()
                 };
             }
@@ -608,7 +608,7 @@ impl<'a> Parser<'a> {
                 let loc = self.advance().loc;
                 node = ExprNode {
                     kind: ExprKind::Le(P::new(node), P::new(self.add())),
-                    loc: loc,
+                    loc,
                     ty: Ty::int()
                 };
             }
@@ -616,7 +616,7 @@ impl<'a> Parser<'a> {
                 let loc = self.advance().loc;
                 node = ExprNode {
                     kind: ExprKind::Lt(P::new(self.add()), P::new(node)),
-                    loc: loc,
+                    loc,
                     ty: Ty::int()
                 };
             }
@@ -624,7 +624,7 @@ impl<'a> Parser<'a> {
                 let loc = self.advance().loc;
                 node = ExprNode {
                     kind: ExprKind::Le(P::new(self.add()), P::new(node)),
-                    loc: loc,
+                    loc,
                     ty: Ty::int()
                 };
             }
@@ -718,7 +718,7 @@ impl<'a> Parser<'a> {
                 let ty = node.ty.clone();
                 node = ExprNode {
                     kind: ExprKind::Mul(P::new(node), P::new(self.unary())),
-                    loc: loc,
+                    loc,
                     ty
                 };
             }
@@ -727,7 +727,7 @@ impl<'a> Parser<'a> {
                 let ty = node.ty.clone();
                 node = ExprNode {
                     kind: ExprKind::Div(P::new(node), P::new(self.unary())),
-                    loc: loc,
+                    loc,
                     ty
                 };
             }
@@ -751,7 +751,7 @@ impl<'a> Parser<'a> {
             let loc = self.advance().loc;
             let node = P::new(self.unary());
             let ty = node.ty.clone();
-            return ExprNode { kind: ExprKind::Neg(node), loc: loc, ty }
+            return ExprNode { kind: ExprKind::Neg(node), loc, ty }
         }
 
         if self.peek_is("&") {
@@ -761,7 +761,7 @@ impl<'a> Parser<'a> {
                 TyKind::Array(base_ty, _) => Ty::ptr(base_ty.clone()),
                 _ => Ty::ptr(node.ty.clone())
             };
-            return ExprNode { kind: ExprKind::Addr(node), loc: loc, ty }
+            return ExprNode { kind: ExprKind::Addr(node), loc, ty }
         }
 
         if self.peek_is("*") {
@@ -832,7 +832,7 @@ impl<'a> Parser<'a> {
         match self.peek().kind {
             TokenKind::Num(val) => {
                 let loc = self.advance().loc;
-                return ExprNode { kind: ExprKind::Num(val), loc: loc, ty: Ty::int() }
+                return ExprNode { kind: ExprKind::Num(val), loc, ty: Ty::int() }
             },
             TokenKind::Keyword => {
                 if self.peek_is("sizeof") {
@@ -855,7 +855,7 @@ impl<'a> Parser<'a> {
                 self.global_vars.push(binding.clone());
                 return ExprNode {
                     kind: ExprKind::Var(binding),
-                    loc: loc,
+                    loc,
                     ty,
                 }
             }
@@ -871,7 +871,7 @@ impl<'a> Parser<'a> {
 
                 if let Some(var_data) = self.find_binding(&name) {
                     let ty = var_data.borrow_mut().ty.clone();
-                    let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), loc: loc, ty };
+                    let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), loc, ty };
                     return expr;
                 }
                 else {
@@ -903,7 +903,7 @@ impl<'a> Parser<'a> {
                         };
                         ExprNode {
                             kind: ExprKind::StmtExpr(P::new(body)),
-                            loc: loc,
+                            loc,
                             ty,
                         }
                     }
@@ -938,7 +938,7 @@ impl<'a> Parser<'a> {
 
         ExprNode {
             kind: ExprKind::Funcall(fn_name, args),
-            loc: loc,
+            loc,
             ty: Ty::int(),
         }
     }
@@ -1026,7 +1026,7 @@ impl<'a> Parser<'a> {
             None => self.ctx.error_at(&loc, "invalid pointer dereference"),
             Some(base_ty) => base_ty.clone()
         };
-        ExprNode { kind: ExprKind::Deref(expr), loc: loc, ty }
+        ExprNode { kind: ExprKind::Deref(expr), loc, ty }
     }
 
     fn mk_unique_id(&mut self, prefix: &str) -> AsciiStr {
@@ -1042,27 +1042,27 @@ impl<'a> Parser<'a> {
 }
 
 fn synth_num(v: i64, loc: SourceLocation) -> ExprNode {
-    ExprNode { kind: ExprKind::Num(v), loc: loc, ty: Ty::int() }
+    ExprNode { kind: ExprKind::Num(v), loc, ty: Ty::int() }
 }
 
 fn synth_add(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
     let ty = lhs.ty.clone();
-    ExprNode { kind: ExprKind::Add(lhs, rhs), loc: loc, ty }
+    ExprNode { kind: ExprKind::Add(lhs, rhs), loc, ty }
 }
 
 fn synth_mul(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
     let ty = lhs.ty.clone();
-    ExprNode { kind: ExprKind::Mul(lhs, rhs), loc: loc, ty }
+    ExprNode { kind: ExprKind::Mul(lhs, rhs), loc, ty }
 }
 
 fn synth_sub(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
     let ty = lhs.ty.clone();
-    ExprNode { kind: ExprKind::Sub(lhs, rhs), loc: loc, ty }
+    ExprNode { kind: ExprKind::Sub(lhs, rhs), loc, ty }
 }
 
 fn synth_div(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
     let ty = lhs.ty.clone();
-    ExprNode { kind: ExprKind::Div(lhs, rhs), loc: loc, ty }
+    ExprNode { kind: ExprKind::Div(lhs, rhs), loc, ty }
 }
 
 fn get_base_ty(ty: &Rc<Ty>) -> Option<&Rc<Ty>> {
