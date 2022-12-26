@@ -95,6 +95,7 @@ pub struct Function {
 
 #[derive(Debug)]
 pub enum BindingKind {
+    Tag,
     GlobalVar { init_data: Option<Vec<u8>> },
     LocalVar { stack_offset: i64 },
     Function(Function),
@@ -151,20 +152,32 @@ pub type StmtNode = Node<StmtKind>;
 pub type SourceUnit = Vec<SP<Binding>>;
 
 struct Scope {
-    bindings: Vec<SP<Binding>>,
+    var_ns: Vec<SP<Binding>>,
+    tag_ns: Vec<SP<Binding>>
 }
 
 impl Scope {
     fn new() -> Self {
-        Scope { bindings: Vec::new() }
+        Scope {
+            var_ns: Vec::new(),
+            tag_ns: Vec::new()
+        }
     }
 
     fn find(&self, name: &[u8]) -> Option<&SP<Binding>> {
-        self.bindings.iter().rfind(|v| v.borrow().name == name)
+        self.var_ns.iter().rfind(|v| v.borrow().name == name)
     }
 
     fn add(&mut self, binding: SP<Binding>) {
-        self.bindings.push(binding);
+        self.var_ns.push(binding);
+    }
+
+    fn find_tag(&self, name: &[u8]) -> Option<&SP<Binding>> {
+        self.tag_ns.iter().rfind(|v| v.borrow().name == name)
+    }
+
+    fn add_tag(&mut self, binding: SP<Binding>) {
+        self.tag_ns.push(binding);
     }
 }
 
@@ -425,7 +438,6 @@ impl<'a> Parser<'a> {
         }
 
         if self.peek_is("struct") {
-            self.advance();
             return self.struct_decl();
         }
 
@@ -497,7 +509,22 @@ impl<'a> Parser<'a> {
         return Ty::func(ret_ty, params);
     }
 
+    // struct-decl = "struct" ident? "{" struct-members
     fn struct_decl(&mut self) -> Rc<Ty> {
+        let mut tag = None;
+        let loc = self.skip("struct").loc;
+
+        if let TokenKind::Ident = self.peek().kind {
+            tag = Some(self.ctx.tok_source(self.advance()));
+        }
+
+        if tag.is_some() && !self.peek_is("{") {
+            match self.find_tag(tag.unwrap()) {
+                Some(binding) => return binding.borrow().ty.clone(),
+                None => self.ctx.error_at(&loc, "unknown struct type"),
+            };
+        }
+
         let mut members = Vec::new();
         let mut offset: usize = 0;
 
@@ -527,7 +554,16 @@ impl<'a> Parser<'a> {
         }
         self.advance(); // }
 
-        Ty::strct(members)
+        let ty = Ty::strct(members);
+        if tag.is_some() {
+            self.add_tag(Rc::new(RefCell::new(Binding {
+                kind: BindingKind::Tag,
+                name: tag.unwrap().to_owned(),
+                ty: ty.clone(),
+                loc,
+            })))
+        }
+        ty
     }
 
     // expr-stmt = expr? ";"
@@ -1000,6 +1036,20 @@ impl<'a> Parser<'a> {
 
     fn add_hidden_global(&mut self, binding: SP<Binding>) {
         self.global_bindings.push(binding);
+    }
+
+    fn add_tag(&mut self, binding: SP<Binding>) {
+        self.scopes.last_mut().unwrap().add_tag(binding);
+    }
+
+    fn find_tag(&self, name: &[u8]) -> Option<&SP<Binding>> {
+        for scope in self.scopes.iter().rev() {
+            let binding = scope.find_tag(name);
+            if binding.is_some() {
+                return binding;
+            }
+        }
+        None
     }
 
     fn peek(&self) -> &Token { &self.toks[self.tok_index] }
