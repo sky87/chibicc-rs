@@ -150,15 +150,32 @@ pub type ExprNode = Node<ExprKind>;
 pub type StmtNode = Node<StmtKind>;
 pub type SourceUnit = Vec<SP<Binding>>;
 
+struct Scope {
+    bindings: Vec<SP<Binding>>,
+}
+
+impl Scope {
+    fn new() -> Self {
+        Scope { bindings: Vec::new() }
+    }
+
+    fn find(&self, name: &[u8]) -> Option<&SP<Binding>> {
+        self.bindings.iter().rfind(|v| v.borrow().name == name)
+    }
+
+    fn add(&mut self, binding: SP<Binding>) {
+        self.bindings.push(binding);
+    }
+}
+
 pub struct Parser<'a> {
     ctx: &'a Context,
     toks: &'a [Token],
     tok_index: usize,
 
-    scope_lens: Vec<usize>,
-    all_local_vars: Vec<SP<Binding>>,
-    cur_local_vars: Vec<SP<Binding>>,
-    global_vars: Vec<SP<Binding>>,
+    scopes: Vec<Scope>,
+    local_bindings: Vec<SP<Binding>>,
+    global_bindings: Vec<SP<Binding>>,
 
     next_unique_id: u64,
 }
@@ -168,15 +185,17 @@ impl<'a> Parser<'a> {
         if toks.is_empty() {
             panic!("Empty token array")
         }
+
+        let global_scope = Scope::new();
+
         Self {
             ctx,
             toks,
             tok_index: 0,
 
-            scope_lens: Vec::new(),
-            all_local_vars: Vec::new(),
-            cur_local_vars: Vec::new(),
-            global_vars: Vec::new(),
+            scopes: vec![global_scope],
+            local_bindings: Vec::new(),
+            global_bindings: Vec::new(),
 
             next_unique_id: 0
         }
@@ -197,8 +216,8 @@ impl<'a> Parser<'a> {
                 },
             }
         }
-        // TODO Any method to "reset the member vector and return a new vec not owned by the struct without cloning"?
-        self.global_vars.clone()
+
+        std::mem::replace(&mut self.global_bindings, Vec::new())
     }
 
     fn global_vars(&mut self) {
@@ -215,7 +234,7 @@ impl<'a> Parser<'a> {
             let (ty, name) = self.declarator(base_ty.clone());
             let gvar = Binding { kind: BindingKind::GlobalVar { init_data: None }, name, ty, loc };
             let binding = Rc::new(RefCell::new(gvar));
-            self.global_vars.push(binding.clone());
+            self.add_global(binding);
         }
         self.skip(";");
     }
@@ -241,12 +260,12 @@ impl<'a> Parser<'a> {
         let base_ty = self.declspec();
         let (ty, name) = self.declarator(base_ty);
 
-        let params = self.all_local_vars.clone();
+        let params = self.local_bindings.clone();
 
         let body = self.compound_stmt();
         // Reverse them to keep the locals layout in line with chibicc
-        let locals: Vec<SP<Binding>> = self.all_local_vars.clone().into_iter().rev().collect();
-        self.global_vars.push(Rc::new(RefCell::new(Binding {
+        let locals: Vec<SP<Binding>> = self.local_bindings.clone().into_iter().rev().collect();
+        self.add_global(Rc::new(RefCell::new(Binding {
             kind: BindingKind::Function(Function {
                 params,
                 locals,
@@ -852,7 +871,7 @@ impl<'a> Parser<'a> {
                     ty: ty.clone(),
                     loc
                 }));
-                self.global_vars.push(binding.clone());
+                self.add_hidden_global(binding.clone());
                 return ExprNode {
                     kind: ExprKind::Var(binding),
                     loc,
@@ -943,35 +962,44 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn find_local(&self, name: &[u8]) -> Option<&SP<Binding>> {
-        self.cur_local_vars.iter().rfind(|v| v.borrow().name == name)
-    }
-
-    fn find_global(&self, name: &[u8]) -> Option<&SP<Binding>> {
-        self.global_vars.iter().find(|v| v.borrow().name == name)
-    }
-
     fn find_binding(&self, name: &[u8]) -> Option<&SP<Binding>> {
-        self.find_local(&name).or_else(|| self.find_global(&name))
+        for scope in self.scopes.iter().rev() {
+            let binding = scope.find(name);
+            if binding.is_some() {
+                return binding;
+            }
+        }
+        None
     }
 
     fn reset_locals(&mut self) {
-        self.all_local_vars.clear();
-        self.cur_local_vars.clear();
+        self.local_bindings.clear();
+        self.scopes.truncate(1);
     }
 
     fn enter_scope(&mut self) {
-        self.scope_lens.push(self.cur_local_vars.len());
+        self.scopes.push(Scope::new());
     }
 
     fn exit_scope(&mut self) {
-        let old_len = self.scope_lens.pop().unwrap();
-        self.cur_local_vars.truncate(old_len);
+        self.scopes.pop();
     }
 
     fn add_local(&mut self, binding: SP<Binding>) {
-        self.all_local_vars.push(binding.clone());
-        self.cur_local_vars.push(binding);
+        self.local_bindings.push(binding.clone());
+        self.scopes.last_mut().unwrap().add(binding);
+    }
+
+    fn add_global(&mut self, binding: SP<Binding>) {
+        self.global_bindings.push(binding.clone());
+        if self.scopes.len() > 1 {
+            panic!("should not be adding to globals when nested scopes are present");
+        }
+        self.scopes.last_mut().unwrap().add(binding);
+    }
+
+    fn add_hidden_global(&mut self, binding: SP<Binding>) {
+        self.global_bindings.push(binding);
     }
 
     fn peek(&self) -> &Token { &self.toks[self.tok_index] }
