@@ -27,15 +27,24 @@ pub struct Token {
 }
 
 lazy_static! {
-    static ref KEYWORDS: HashSet<&'static [u8]> = {
-        [
-            "return",
-            "if", "else",
-            "for", "while",
-            "sizeof",
-            "int", "char", "struct"
-        ].map(|k| k.as_bytes()).into()
-    };
+    static ref KEYWORDS: HashSet<&'static [u8]> = [
+        "return",
+        "if", "else",
+        "for", "while",
+        "sizeof",
+        "int", "char", "struct"
+    ].map(|k| k.as_bytes()).into();
+
+    static ref PUNCTUATION: Vec<&'static [u8]> = [
+        // Longer strings should go first
+        "==", "!=", "<=", ">=",
+        "->",
+
+        ";", "=", "(", ")",
+        "{", "}", ",", ".", "[", "]",
+        "+", "-", "*", "/",
+        "<", ">", "&"
+    ].map(|p| p.as_bytes()).into();
 }
 
 pub struct Lexer<'a> {
@@ -283,13 +292,6 @@ fn digit_to_number(digit: u8) -> u8 {
     panic!("invalid digit");
 }
 
-fn ispunct(c: u8) -> bool {
-    return c == b';' || c == b'=' || c == b'(' || c == b')' ||
-        c == b'{' || c == b'}' || c == b',' || c == b'.' || c == b'[' || c == b']' ||
-        c == b'+' || c == b'-' || c == b'*' || c == b'/' ||
-        c == b'<' || c == b'>' || c == b'&';
-}
-
 fn is_ident_start(c: u8) -> bool {
     c.is_ascii_alphabetic() || c == b'_'
 }
@@ -297,19 +299,11 @@ fn is_ident_cont(c: u8) -> bool {
     is_ident_start(c) || c.is_ascii_digit()
 }
 
-fn starts_with(src: &[u8], s: &str) -> bool {
-    return src.starts_with(s.as_bytes());
-}
-
 fn read_punct(src: &[u8]) -> usize {
-    if starts_with(src, "==") || starts_with(src, "!=")
-       || starts_with(src, "<=") || starts_with(src, ">=") {
-        2
+    for p in PUNCTUATION.iter() {
+        if src.starts_with(p) {
+            return p.len();
+        }
     }
-    else if ispunct(src[0]) {
-        1
-    }
-    else {
-        0
-    }
+    0
 }

@@ -828,7 +828,7 @@ impl<'a> Parser<'a> {
         self.postfix()
     }
 
-    // postfix = "primary" ("[" expr | "." ident "]")*
+    // postfix = "primary" ("[" expr "]" | "." struct_ref | "->" struct_ref)*
     fn postfix(&mut self) -> ExprNode {
         let mut node = self.primary();
         loop {
@@ -844,36 +844,48 @@ impl<'a> Parser<'a> {
 
             if self.peek_is(".") {
                 self.advance();
-                let loc = self.peek().loc;
-                let name = {
-                    let name_tok = self.peek();
-                    if !matches!(name_tok.kind, TokenKind::Ident) {
-                        self.ctx.error_tok(name_tok, "expected struct member name");
-                    }
-                    self.ctx.tok_source(name_tok)
-                };
-                let members = {
-                    match &node.ty.kind {
-                        TyKind::Struct(members) => members,
-                        _ => self.ctx.error_at(&node.loc, "not a struct"),
-                    }
-                };
-                let member = members.iter().find(|m| m.name == name).unwrap_or_else(||
-                    self.ctx.error_at(&loc, "no such member")
-                ).clone();
+                node = self.struct_ref(node);
+                continue;
+            }
 
-                let ty = member.ty.clone();
-                node = ExprNode {
-                    kind: ExprKind::MemberAccess(Box::new(node), member),
-                    loc,
-                    ty,
-                };
-
-                self.advance();
+            if self.peek_is("->") {
+                // x -> y is short for (*x).y
+                let loc = self.advance().loc;
+                node = self.synth_deref(Box::new(node), loc);
+                node = self.struct_ref(node);
                 continue;
             }
 
             return node;
+        }
+    }
+
+    // struct_ref = ident
+    fn struct_ref(&mut self, struct_node: ExprNode) -> ExprNode {
+        let loc = self.peek().loc;
+        let name = {
+            let name_tok = self.peek();
+            if !matches!(name_tok.kind, TokenKind::Ident) {
+                self.ctx.error_tok(name_tok, "expected struct member name");
+            }
+            self.ctx.tok_source(name_tok)
+        };
+        self.advance();
+        let members = {
+            match &struct_node.ty.kind {
+                TyKind::Struct(members) => members,
+                _ => self.ctx.error_at(&struct_node.loc, "not a struct"),
+            }
+        };
+        let member = members.iter().find(|m| m.name == name).unwrap_or_else(||
+            self.ctx.error_at(&loc, "no such member")
+        ).clone();
+
+        let ty = member.ty.clone();
+        ExprNode {
+            kind: ExprKind::MemberAccess(Box::new(struct_node), member),
+            loc,
+            ty,
         }
     }
 
