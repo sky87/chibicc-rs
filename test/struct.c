@@ -25,8 +25,8 @@ int main() {
   ASSERT(48, ({ struct {int a[3];} x[2]; sizeof(x); }));
   ASSERT(2, ({ struct {char a; char b;} x; sizeof(x); }));
   ASSERT(0, ({ struct {} x; sizeof(x); }));
-  ASSERT(16, ({ struct {char a; int b;} x; sizeof(x); }));
-  ASSERT(16, ({ struct {int a; char b;} x; sizeof(x); }));
+  ASSERT(24, ({ struct {char a; int b; char c;} x; sizeof(x); }));
+  ASSERT(16, ({ struct {int a; char b; char c;} x; sizeof(x); }));
 
   ASSERT(16, ({ struct t {int a; int b;} x; struct t y; sizeof(y); }));
   ASSERT(16, ({ struct t {int a; int b;}; struct t y; sizeof(y); }));

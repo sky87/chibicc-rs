@@ -43,17 +43,22 @@ impl Ty {
         let base_align = base.align;
         Rc::new(Ty { kind: TyKind::Array(base, len), size: base_size*len, align: base_align })
     }
-    fn strct(members: Vec<Rc<Member>>) -> Rc<Ty> {
+    fn strct(mut members: Vec<Member>) -> Rc<Ty> {
         let mut size = 0;
         let mut align = 1;
-        for m in &members {
+        for m in &mut members {
+            size = align_to(size, m.ty.align);
+            m.offset = size;
             size += m.ty.size;
             if align < m.ty.align {
                 align = m.ty.align;
             }
         }
         size = align_to(size, align);
-        Rc::new(Ty { kind: TyKind::Struct(members), size, align })
+        Rc::new(Ty {
+            kind: TyKind::Struct(members.into_iter().map(|m| Rc::new(m)).collect()),
+            size, align
+        })
     }
 
     fn is_integer_like(&self) -> bool {
@@ -541,11 +546,11 @@ impl<'a> Parser<'a> {
                 let (ty, name) = self.declarator(base_ty.clone());
                 let size = ty.size;
                 offset = align_to(offset, ty.align);
-                members.push(Rc::new(Member {
+                members.push(Member {
                     name,
                     ty,
                     offset,
-                }));
+                });
                 offset += size;
 
                 i+= 1;
