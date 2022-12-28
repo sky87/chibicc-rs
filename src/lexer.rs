@@ -32,7 +32,8 @@ lazy_static! {
         "if", "else",
         "for", "while",
         "sizeof",
-        "int", "char", "struct"
+        "int", "char",
+        "struct", "union"
     ].map(|k| k.as_bytes()).into();
 
     static ref PUNCTUATION: Vec<&'static [u8]> = [

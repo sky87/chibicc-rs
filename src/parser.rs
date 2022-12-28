@@ -15,6 +15,7 @@ pub enum TyKind {
     Fn(Rc<Ty>, Vec<Rc<Ty>>),
     Array(Rc<Ty>, usize),
     Struct(Vec<Rc<Member>>),
+    Union(Vec<Rc<Member>>),
     Unit
 }
 
@@ -59,6 +60,11 @@ impl Ty {
             kind: TyKind::Struct(members.into_iter().map(|m| Rc::new(m)).collect()),
             size, align
         })
+    }
+    fn union(members: Vec<Member>) -> Rc<Ty> {
+        let size = members.iter().map(|m| m.ty.size).max().unwrap_or(0);
+        let align = members.iter().map(|m| m.ty.align).max().unwrap_or(1);
+        Rc::new(Ty { kind: TyKind::Union(members.into_iter().map(|m| Rc::new(m)).collect()), size, align })
     }
 
     fn is_integer_like(&self) -> bool {
@@ -386,7 +392,7 @@ impl<'a> Parser<'a> {
     }
 
     fn peek_is_ty_name(&self) -> bool {
-        self.peek_is("char") || self.peek_is("int") || self.peek_is("struct")
+        self.peek_is("char") || self.peek_is("int") || self.peek_is("struct") || self.peek_is("union")
     }
 
     // declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
@@ -442,8 +448,8 @@ impl<'a> Parser<'a> {
             return Ty::int();
         }
 
-        if self.peek_is("struct") {
-            return self.struct_decl();
+        if self.peek_is("struct") || self.peek_is("union") {
+            return self.struct_union_decl();
         }
 
         self.ctx.error_tok(self.peek(), "typename expected");
@@ -514,10 +520,11 @@ impl<'a> Parser<'a> {
         return Ty::func(ret_ty, params);
     }
 
-    // struct-decl = "struct" ident? "{" struct-members
-    fn struct_decl(&mut self) -> Rc<Ty> {
+    // struct-decl = ("struct" | "union") ident? ("{" (declspec declarator (","  declarator)* ";")* "}")?
+    fn struct_union_decl(&mut self) -> Rc<Ty> {
         let mut tag = None;
-        let loc = self.skip("struct").loc;
+        let is_struct = self.peek_is("struct");
+        let loc = self.advance().loc;
 
         if let TokenKind::Ident = self.peek().kind {
             tag = Some(self.ctx.tok_source(self.advance()));
@@ -525,13 +532,26 @@ impl<'a> Parser<'a> {
 
         if tag.is_some() && !self.peek_is("{") {
             match self.find_tag(tag.unwrap()) {
-                Some(binding) => return binding.borrow().ty.clone(),
-                None => self.ctx.error_at(&loc, "unknown struct type"),
+                Some(binding) => {
+                    let binding = binding.borrow();
+                    let binding_is_struct = matches!(binding.ty.kind, TyKind::Struct(_));
+                    if is_struct && !binding_is_struct {
+                        self.ctx.error_at(&loc, "bound tag is a union")
+                    }
+                    if !is_struct && binding_is_struct {
+                        self.ctx.error_at(&loc, "bound tag is a struct")
+                    }
+                    return binding.ty.clone();
+                },
+                None => {
+                    self.ctx.error_at(&loc,
+                        if is_struct { "unknown struct type" } else { "unknown union type" }
+                    )
+                }
             };
         }
 
         let mut members = Vec::new();
-        let mut offset: usize = 0;
 
         self.skip("{");
         while !self.peek_is("}") {
@@ -544,14 +564,11 @@ impl<'a> Parser<'a> {
                 }
 
                 let (ty, name) = self.declarator(base_ty.clone());
-                let size = ty.size;
-                offset = align_to(offset, ty.align);
                 members.push(Member {
                     name,
                     ty,
-                    offset,
+                    offset: 0, // offsets are set by the type constructor
                 });
-                offset += size;
 
                 i+= 1;
             }
@@ -559,7 +576,7 @@ impl<'a> Parser<'a> {
         }
         self.advance(); // }
 
-        let ty = Ty::strct(members);
+        let ty = if is_struct { Ty::strct(members) } else { Ty::union(members) };
         if tag.is_some() {
             self.add_tag(Rc::new(RefCell::new(Binding {
                 kind: BindingKind::Tag,
@@ -879,6 +896,7 @@ impl<'a> Parser<'a> {
         let members = {
             match &struct_node.ty.kind {
                 TyKind::Struct(members) => members,
+                TyKind::Union(members) => members,
                 _ => self.ctx.error_at(&struct_node.loc, "not a struct"),
             }
         };
