@@ -331,8 +331,16 @@ impl<'a> Codegen<'a> {
     }
 
     fn load(&mut self, ty: &Ty) {
-        if let TyKind::Array(_, _) = ty.kind {
-            return;
+        match ty.kind {
+            TyKind::Array(_, _) | TyKind::Struct(_) | TyKind::Union(_) =>
+                // If it is an array/struct/union, do not attempt to load a value to the
+                // register because in general we can't load an entire array to a
+                // register. As a result, the result of an evaluation of an array
+                // becomes not the array itself but the address of the array.
+                // This is where "array is automatically converted to a pointer to
+                // the first element of the array in C" occurs.
+                return,
+            _ => {},
         }
 
         if ty.size == 1 {
@@ -345,6 +353,17 @@ impl<'a> Codegen<'a> {
 
     fn store(&mut self, ty: &Ty) {
         self.pop("%rdi");
+
+        match &ty.kind {
+            TyKind::Struct(_) | TyKind::Union(_) => {
+                for i in 0..ty.size {
+                    wln!(self, "  mov {}(%rax), %r8b", i);
+                    wln!(self, "  mov %r8b, {}(%rdi)", i);
+                }
+                return;
+            },
+            _ => {}
+        }
 
         if ty.size == 1 {
             wln!(self, "  mov %al, (%rdi)");
