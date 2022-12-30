@@ -5,6 +5,9 @@ use crate::{parser::{BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKi
 const ARG_REGS8: [&str;6] = [
     "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"
 ];
+const ARG_REGS32: [&str;6] = [
+    "%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"
+];
 const ARG_REGS64: [&str;6] = [
     "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"
 ];
@@ -140,12 +143,7 @@ impl<'a> Codegen<'a> {
                 for (i, param) in params.iter().enumerate() {
                     let param = param.borrow();
                     if let BindingKind::LocalVar { stack_offset } = param.kind {
-                        if param.ty.size == 1 {
-                            wln!(self, "  mov {}, {}(%rbp)", ARG_REGS8[i], stack_offset);
-                        }
-                        else {
-                            wln!(self, "  mov {}, {}(%rbp)", ARG_REGS64[i], stack_offset);
-                        }
+                        self.store_gp(i, stack_offset, param.ty.size)
                     }
                 }
 
@@ -159,6 +157,15 @@ impl<'a> Codegen<'a> {
                 wln!(self, "  ret");
                 wln!(self);
             };
+        }
+    }
+
+    fn store_gp(&mut self, reg_idx: usize, stack_offset: i64, size: usize) {
+        match size {
+            1 => wln!(self, " mov {}, {}(%rbp)", ARG_REGS8[reg_idx], stack_offset),
+            4 => wln!(self, " mov {}, {}(%rbp)", ARG_REGS32[reg_idx], stack_offset),
+            8 => wln!(self, " mov {}, {}(%rbp)", ARG_REGS64[reg_idx], stack_offset),
+            _ => panic!("invalid size")
         }
     }
 
@@ -346,6 +353,9 @@ impl<'a> Codegen<'a> {
         if ty.size == 1 {
             wln!(self, "  movsbq (%rax), %rax");
         }
+        else if ty.size == 4 {
+            wln!(self, "  movsxd (%rax), %rax");
+        }
         else {
             wln!(self, "  mov (%rax), %rax");
         }
@@ -367,6 +377,9 @@ impl<'a> Codegen<'a> {
 
         if ty.size == 1 {
             wln!(self, "  mov %al, (%rdi)");
+        }
+        else if ty.size == 4 {
+            wln!(self, "  mov %eax, (%rdi)");
         }
         else {
             wln!(self, "  mov %rax, (%rdi)");
