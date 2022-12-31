@@ -166,6 +166,11 @@ pub type ExprNode = Node<ExprKind>;
 pub type StmtNode = Node<StmtKind>;
 pub type SourceUnit = Vec<SP<Binding>>;
 
+struct ScopeCheckpoint {
+    var_ns_len: usize,
+    tag_ns_len: usize
+}
+
 struct Scope {
     var_ns: Vec<SP<Binding>>,
     tag_ns: Vec<SP<Binding>>
@@ -194,18 +199,41 @@ impl Scope {
     fn add_tag(&mut self, binding: SP<Binding>) {
         self.tag_ns.push(binding);
     }
+
+    fn checkpoint(&self) -> ScopeCheckpoint {
+        ScopeCheckpoint { var_ns_len: self.var_ns.len(), tag_ns_len: self.tag_ns.len() }
+    }
+
+    fn reset_to(&mut self, chkp: &ScopeCheckpoint) {
+        reset_vec_len(&mut self.var_ns, chkp.var_ns_len, "scope.var_ns");
+        reset_vec_len(&mut self.tag_ns, chkp.tag_ns_len, "scope.tag_ns");
+    }
+}
+
+struct ParserCheckpoint {
+    scopes_len: usize,
+    last_scope_checkpoint: ScopeCheckpoint,
+    tok_index: usize,
+    cur_fn_local_bindings_len: usize,
+    global_bindings_len: usize,
+    next_unique_id: u64
 }
 
 pub struct Parser<'a> {
     ctx: &'a Context,
     toks: &'a [Token],
+
+    // State
     tok_index: usize,
 
     scopes: Vec<Scope>,
-    local_bindings: Vec<SP<Binding>>,
+    cur_fn_local_bindings: Vec<SP<Binding>>,
     global_bindings: Vec<SP<Binding>>,
 
     next_unique_id: u64,
+
+    // Speculation
+    checkpoint_stack: Vec<ParserCheckpoint>
 }
 
 impl<'a> Parser<'a> {
@@ -219,13 +247,18 @@ impl<'a> Parser<'a> {
         Self {
             ctx,
             toks,
+
+            // State
             tok_index: 0,
 
             scopes: vec![global_scope],
-            local_bindings: Vec::new(),
+            cur_fn_local_bindings: Vec::new(),
             global_bindings: Vec::new(),
 
-            next_unique_id: 0
+            next_unique_id: 0,
+
+            // Speculation
+            checkpoint_stack: Vec::new(),
         }
     }
 
@@ -272,27 +305,25 @@ impl<'a> Parser<'a> {
             return false;
         }
 
-        let idx = self.tok_index;
+        self.begin_speculation();
+
         let base_ty = self.declspec();
         let (ty, _) = self.declarator(base_ty);
 
-        self.tok_index = idx;
-        self.reset_locals();
+        self.end_speculation();
         matches!(ty.kind, TyKind::Fn(_, _))
     }
 
     fn function(&mut self) {
-        self.reset_locals();
-
         let loc = self.peek().loc;
         let base_ty = self.declspec();
         let (ty, name) = self.declarator(base_ty);
 
-        let params = self.local_bindings.clone();
+        let params = self.cur_fn_local_bindings.clone();
 
         let body = self.compound_stmt();
         // Reverse them to keep the locals layout in line with chibicc
-        let locals: Vec<SP<Binding>> = self.local_bindings.clone().into_iter().rev().collect();
+        let locals: Vec<SP<Binding>> = self.cur_fn_local_bindings.clone().into_iter().rev().collect();
         self.add_global(Rc::new(RefCell::new(Binding {
             kind: BindingKind::Function(Function {
                 params,
@@ -304,6 +335,8 @@ impl<'a> Parser<'a> {
             ty,
             loc,
         })));
+
+        self.cur_fn_local_bindings.clear();
     }
 
     // stmt = "return" expr ";"
@@ -470,12 +503,25 @@ impl<'a> Parser<'a> {
         self.ctx.error_tok(self.peek(), "typename expected");
     }
 
-    // declarator = "*"* ident type-suffix
+    // declarator = "*"* ("(" ident ")" | "(" declarator ")" | ident) type-suffix
     fn declarator(&mut self, base_ty: Rc<Ty>) -> (Rc<Ty>, AsciiStr) {
         let mut ty = base_ty;
         while self.peek_is("*") {
             self.advance();
             ty = Ty::ptr(ty);
+        }
+
+        if self.peek_is("(") {
+            self.advance();
+            self.begin_speculation();
+            self.declarator(Ty::unit());
+            self.skip(")");
+            ty = self.type_suffix(ty);
+            let after_suffix = self.tok_index;
+            self.end_speculation();
+            let res = self.declarator(ty);
+            self.skip_to_tok(after_suffix);
+            return res;
         }
 
         let decl = match self.peek().kind {
@@ -1058,11 +1104,6 @@ impl<'a> Parser<'a> {
         None
     }
 
-    fn reset_locals(&mut self) {
-        self.local_bindings.clear();
-        self.scopes.truncate(1);
-    }
-
     fn enter_scope(&mut self) {
         self.scopes.push(Scope::new());
     }
@@ -1072,7 +1113,7 @@ impl<'a> Parser<'a> {
     }
 
     fn add_local(&mut self, binding: SP<Binding>) {
-        self.local_bindings.push(binding.clone());
+        self.cur_fn_local_bindings.push(binding.clone());
         self.scopes.last_mut().unwrap().add(binding);
     }
 
@@ -1100,6 +1141,41 @@ impl<'a> Parser<'a> {
             }
         }
         None
+    }
+
+    fn skip_to_tok(&mut self, new_tok_index: usize) {
+        self.tok_index = new_tok_index;
+    }
+
+    fn begin_speculation(&mut self) {
+        self.checkpoint_stack.push(self.checkpoint());
+    }
+
+    fn end_speculation(&mut self) {
+        let chkp = self.checkpoint_stack.pop().unwrap_or_else(||
+            panic!("end_speculation called where there was no speculation active")
+        );
+        self.reset_to(&chkp);
+    }
+
+    fn checkpoint(&self) -> ParserCheckpoint {
+        ParserCheckpoint {
+            scopes_len: self.scopes.len(),
+            last_scope_checkpoint: self.scopes.last().unwrap().checkpoint(),
+            tok_index: self.tok_index,
+            cur_fn_local_bindings_len: self.cur_fn_local_bindings.len(),
+            global_bindings_len: self.global_bindings.len(),
+            next_unique_id: self.next_unique_id,
+        }
+    }
+
+    fn reset_to(&mut self, chkp: &ParserCheckpoint) {
+        reset_vec_len(&mut self.scopes, chkp.scopes_len, "parser.scopes");
+        self.scopes.last_mut().unwrap().reset_to(&chkp.last_scope_checkpoint);
+        self.tok_index = chkp.tok_index;
+        reset_vec_len(&mut self.cur_fn_local_bindings, chkp.cur_fn_local_bindings_len, "parser.local_bindings");
+        reset_vec_len(&mut self.global_bindings, chkp.global_bindings_len, "parser.global_bindings");
+        self.next_unique_id = chkp.next_unique_id;
     }
 
     fn peek(&self) -> &Token { &self.toks[self.tok_index] }
@@ -1199,4 +1275,14 @@ fn get_base_ty(ty: &Rc<Ty>) -> Option<&Rc<Ty>> {
         TyKind::Array(bt, _) => Some(bt),
         _ => None
     }
+}
+
+fn reset_vec_len<E>(v: &mut Vec<E>, new_len: usize, name: &str) {
+    if v.len() < new_len {
+        panic!(
+            "failed to reset {} to length {} because the current length {} is less than the new one",
+            name, new_len, v.len()
+        )
+    }
+    v.truncate(new_len)
 }
