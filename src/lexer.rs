@@ -32,7 +32,7 @@ lazy_static! {
         "if", "else",
         "for", "while",
         "sizeof",
-        "int", "char",
+        "long", "int", "char",
         "struct", "union"
     ].map(|k| k.as_bytes()).into();
 

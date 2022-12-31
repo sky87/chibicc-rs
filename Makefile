@@ -18,7 +18,7 @@ $(TESTS_BUILD_DIR)/%: $(BIN) test/%.c
 	$(CC) -o $@ $(TESTS_BUILD_DIR)/$*.s -xc test/common
 
 test: $(TESTS)
-	for i in $^; do echo $$i; ./$$i || exit 1; echo; done
+	@for i in $^; do echo $$i; ./$$i || exit 1; echo; done
 	test/driver.sh
 
 clean:
