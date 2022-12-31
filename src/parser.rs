@@ -9,9 +9,10 @@ pub type SP<A> = Rc<RefCell<A>>;
 
 #[derive(Debug)]
 pub enum TyKind {
+    Char,
+    Short,
     Int,
     Long,
-    Char,
     Ptr(Rc<Ty>),
     Fn(Rc<Ty>, Vec<Rc<Ty>>),
     Array(Rc<Ty>, usize),
@@ -35,9 +36,10 @@ pub struct Ty {
 }
 
 impl Ty {
+    fn char() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Char, size: 1, align: 1 }) }
+    fn short() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Short, size: 2, align: 2 }) }
     fn int() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Int, size: 4, align: 4 }) }
     fn long() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Long, size: 8, align: 8 }) }
-    fn char() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Char, size: 1, align: 1 }) }
     fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 0, align: 1 }) }
     fn ptr(base: Rc<Ty>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Ptr(base), size: 8, align: 8 }) }
     fn func(ret: Rc<Ty>, params: Vec<Rc<Ty>>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Fn(ret, params), size: 0, align: 1 }) }
@@ -71,7 +73,7 @@ impl Ty {
 
     fn is_integer_like(&self) -> bool {
         match &self.kind {
-            TyKind::Int | TyKind::Long | TyKind::Char => true,
+            TyKind::Char | TyKind::Short | TyKind::Int | TyKind::Long => true,
             _ => false,
         }
     }
@@ -394,7 +396,7 @@ impl<'a> Parser<'a> {
     }
 
     fn peek_is_ty_name(&self) -> bool {
-        self.peek_is("char") || self.peek_is("int") || self.peek_is("long") ||
+        self.peek_is("char") || self.peek_is("short") || self.peek_is("int") || self.peek_is("long") ||
         self.peek_is("struct") || self.peek_is("union")
     }
 
@@ -444,6 +446,11 @@ impl<'a> Parser<'a> {
         if self.peek_is("char") {
             self.advance();
             return Ty::char()
+        }
+
+        if self.peek_is("short") {
+            self.advance();
+            return Ty::short();
         }
 
         if self.peek_is("int") {

@@ -5,6 +5,9 @@ use crate::{parser::{BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKi
 const ARG_REGS8: [&str;6] = [
     "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"
 ];
+const ARG_REGS16: [&str;6] = [
+    "%di", "%si", "%dx", "%cx", "%r8w", "%r9w"
+];
 const ARG_REGS32: [&str;6] = [
     "%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"
 ];
@@ -163,6 +166,7 @@ impl<'a> Codegen<'a> {
     fn store_gp(&mut self, reg_idx: usize, stack_offset: i64, size: usize) {
         match size {
             1 => wln!(self, " mov {}, {}(%rbp)", ARG_REGS8[reg_idx], stack_offset),
+            2 => wln!(self, " mov {}, {}(%rbp)", ARG_REGS16[reg_idx], stack_offset),
             4 => wln!(self, " mov {}, {}(%rbp)", ARG_REGS32[reg_idx], stack_offset),
             8 => wln!(self, " mov {}, {}(%rbp)", ARG_REGS64[reg_idx], stack_offset),
             _ => panic!("invalid size")
@@ -353,6 +357,9 @@ impl<'a> Codegen<'a> {
         if ty.size == 1 {
             wln!(self, "  movsbq (%rax), %rax");
         }
+        else if ty.size == 2 {
+            wln!(self, "  movswq (%rax), %rax");
+        }
         else if ty.size == 4 {
             wln!(self, "  movsxd (%rax), %rax");
         }
@@ -377,6 +384,9 @@ impl<'a> Codegen<'a> {
 
         if ty.size == 1 {
             wln!(self, "  mov %al, (%rdi)");
+        }
+        else if ty.size == 2 {
+            wln!(self, "  mov %ax, (%rdi)");
         }
         else if ty.size == 4 {
             wln!(self, "  mov %eax, (%rdi)");
