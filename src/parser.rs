@@ -110,7 +110,7 @@ pub struct Function {
 
 #[derive(Debug)]
 pub enum BindingKind {
-    Tag,
+    Decl,
     GlobalVar { init_data: Option<Vec<u8>> },
     LocalVar { stack_offset: i64 },
     Function(Function),
@@ -320,6 +320,17 @@ impl<'a> Parser<'a> {
         let (ty, name) = self.declarator(base_ty);
 
         let params = self.cur_fn_local_bindings.clone();
+
+        if self.peek_is(";") {
+            self.advance();
+            self.add_global(Rc::new(RefCell::new(Binding {
+                kind: BindingKind::Decl,
+                name,
+                ty,
+                loc,
+            })));
+            return;
+        }
 
         let body = self.compound_stmt();
         // Reverse them to keep the locals layout in line with chibicc
@@ -640,7 +651,7 @@ impl<'a> Parser<'a> {
         let ty = if is_struct { Ty::strct(members) } else { Ty::union(members) };
         if tag.is_some() {
             self.add_tag(Rc::new(RefCell::new(Binding {
-                kind: BindingKind::Tag,
+                kind: BindingKind::Decl,
                 name: tag.unwrap().to_owned(),
                 ty: ty.clone(),
                 loc,
