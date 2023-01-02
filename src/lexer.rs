@@ -27,14 +27,19 @@ pub struct Token {
 }
 
 lazy_static! {
-    static ref KEYWORDS: HashSet<&'static [u8]> = [
-        "return",
-        "if", "else",
-        "for", "while",
-        "sizeof",
-        "long", "int", "short", "char",
-        "struct", "union"
+    pub static ref TY_KEYWORDS: HashSet<&'static [u8]> = [
+        "void", "char", "short", "int", "long", "struct", "union"
     ].map(|k| k.as_bytes()).into();
+
+    static ref KEYWORDS: HashSet<&'static [u8]> = {
+        let others: HashSet<&'static [u8]> = [
+            "return",
+            "if", "else",
+            "for", "while",
+            "sizeof"
+        ].map(|k| k.as_bytes()).into();
+        others.union(&TY_KEYWORDS).cloned().collect()
+    };
 
     static ref PUNCTUATION: Vec<&'static [u8]> = [
         // Longer strings should go first

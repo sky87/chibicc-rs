@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use std::rc::Rc;
 
-use crate::{lexer::{Token, TokenKind, SourceLocation}, context::{AsciiStr, Context, ascii}, codegen::align_to};
+use crate::{lexer::{Token, TokenKind, SourceLocation, TY_KEYWORDS}, context::{AsciiStr, Context, ascii}, codegen::align_to};
 
 pub type P<A> = Box<A>;
 pub type SP<A> = Rc<RefCell<A>>;
@@ -40,7 +40,7 @@ impl Ty {
     fn short() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Short, size: 2, align: 2 }) }
     fn int() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Int, size: 4, align: 4 }) }
     fn long() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Long, size: 8, align: 8 }) }
-    fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 0, align: 1 }) }
+    fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 1, align: 1 }) }
     fn ptr(base: Rc<Ty>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Ptr(base), size: 8, align: 8 }) }
     fn func(ret: Rc<Ty>, params: Vec<Rc<Ty>>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Fn(ret, params), size: 0, align: 1 }) }
     fn array(base: Rc<Ty>, len: usize) -> Rc<Ty> {
@@ -440,8 +440,7 @@ impl<'a> Parser<'a> {
     }
 
     fn peek_is_ty_name(&self) -> bool {
-        self.peek_is("char") || self.peek_is("short") || self.peek_is("int") || self.peek_is("long") ||
-        self.peek_is("struct") || self.peek_is("union")
+        TY_KEYWORDS.contains(self.ctx.tok_source(self.peek()))
     }
 
     // declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
@@ -457,6 +456,9 @@ impl<'a> Parser<'a> {
 
             let loc = self.peek().loc;
             let (ty, name) = self.declarator(base_ty.clone());
+            if matches!(ty.kind, TyKind::Unit) {
+                self.ctx.error_at(&loc, "variable declared void");
+            }
             let var_data = Rc::new(RefCell::new(Binding {
                 kind: BindingKind::LocalVar { stack_offset: -1 },
                 name,
@@ -487,9 +489,14 @@ impl<'a> Parser<'a> {
 
     // declspec = "int" | "char" | "struct" struct-decl
     fn declspec(&mut self) -> Rc<Ty> {
+        if self.peek_is("void") {
+            self.advance();
+            return Ty::unit();
+        }
+
         if self.peek_is("char") {
             self.advance();
-            return Ty::char()
+            return Ty::char();
         }
 
         if self.peek_is("short") {
