@@ -487,38 +487,69 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // declspec = "int" | "char" | "struct" struct-decl
+    // declspec = struct-decl | union-decl | "void" | "char" | ("short" | "int" | "long")+
+    //
+    // The order of typenames in a type-specifier doesn't matter. For
+    // example, `int long static` means the same as `static long int`.
+    // That can also be written as `static long` because you can omit
+    // `int` if `long` or `short` are specified. However, something like
+    // `char int` is not a valid type specifier. We have to accept only a
+    // limited combinations of the typenames.
+    //
+    // In this function, we count the number of occurrences of each typename
+    // while keeping the "current" type object that the typenames up
+    // until that point represent. When we reach a non-typename token,
+    // we returns the current type object.
     fn declspec(&mut self) -> Rc<Ty> {
+        if self.peek_is("struct") || self.peek_is("union") {
+            return self.struct_union_decl();
+        }
         if self.peek_is("void") {
             self.advance();
             return Ty::unit();
         }
-
         if self.peek_is("char") {
             self.advance();
             return Ty::char();
         }
 
-        if self.peek_is("short") {
+        #[derive(PartialOrd, Ord, PartialEq, Eq)]
+        enum DeclTy {
+            Short, Int, Long
+        }
+        use DeclTy::*;
+
+        let mut decl_tys: Vec<DeclTy> = Vec::new();
+        let loc = self.peek().loc;
+
+        while self.peek_is_ty_name() {
+            if self.peek_is("short") {
+                decl_tys.push(Short);
+            }
+            else if self.peek_is("int") {
+                decl_tys.push(Int);
+            }
+            else if self.peek_is("long") {
+                decl_tys.push(Long);
+            }
+            else {
+                self.ctx.error_tok(self.peek(), "invalid type");
+            }
             self.advance();
+        }
+
+        decl_tys.sort();
+        if decl_tys == [Short] || decl_tys == [Short, Int] {
             return Ty::short();
         }
-
-        if self.peek_is("int") {
-            self.advance();
+        else if decl_tys == [Int] {
             return Ty::int();
         }
-
-        if self.peek_is("long") {
-            self.advance();
+        else if decl_tys == [Long] || decl_tys == [Int, Long] {
             return Ty::long();
         }
 
-        if self.peek_is("struct") || self.peek_is("union") {
-            return self.struct_union_decl();
-        }
-
-        self.ctx.error_tok(self.peek(), "typename expected");
+        self.ctx.error_at(&loc, "invalid type");
     }
 
     // declarator = "*"* ("(" ident ")" | "(" declarator ")" | ident) type-suffix
