@@ -545,7 +545,7 @@ impl<'a> Parser<'a> {
         else if decl_tys == [Int] {
             return Ty::int();
         }
-        else if decl_tys == [Long] || decl_tys == [Int, Long] {
+        else if decl_tys == [Long] || decl_tys == [Int, Long] || decl_tys == [Long, Long] {
             return Ty::long();
         }
 
