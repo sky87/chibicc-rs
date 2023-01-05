@@ -111,6 +111,7 @@ pub struct Function {
 #[derive(Debug)]
 pub enum BindingKind {
     Decl,
+    Typedef,
     GlobalVar { init_data: Option<Vec<u8>> },
     LocalVar { stack_offset: i64 },
     Function(Function),
@@ -268,7 +269,10 @@ impl<'a> Parser<'a> {
             match self.peek().kind {
                 TokenKind::Eof => break,
                 _ => {
-                    if self.is_function() {
+                    if self.peek_is("typedef") {
+                        self.typedef();
+                    }
+                    else if self.is_function() {
                         self.function();
                     }
                     else {
@@ -416,7 +420,7 @@ impl<'a> Parser<'a> {
         self.expr_stmt()
     }
 
-    // compound_stmt = "{" (declaration | stmt)* "}
+    // compound_stmt = "{" (typedef | declaration | stmt)* "}
     fn compound_stmt(&mut self) -> StmtNode {
         let loc = self.skip("{").loc;
         let mut stmts = Vec::new();
@@ -424,7 +428,10 @@ impl<'a> Parser<'a> {
         self.enter_scope();
 
         while !self.peek_is("}") {
-            if self.peek_is_ty_name() {
+            if self.peek_is("typedef") {
+                self.typedef();
+            }
+            else if self.peek_is_ty_name() {
                 self.declaration(&mut stmts);
             }
             else {
@@ -439,8 +446,34 @@ impl<'a> Parser<'a> {
         StmtNode { kind: StmtKind::Block(stmts), loc, ty: Ty::unit() }
     }
 
+    // typedef = "typedef" declspec declarator (","" declarator)+ ";"
+    fn typedef(&mut self) {
+        self.skip("typedef");
+        let base_ty = self.declspec();
+
+        let mut count = 0;
+        while !self.peek_is(";") {
+            if count > 0 {
+                self.skip(",");
+            }
+            count += 1;
+
+            let loc = self.peek().loc;
+            let (ty, name) = self.declarator(base_ty.clone());
+            let binding = Rc::new(RefCell::new(Binding {
+                kind: BindingKind::Typedef,
+                name,
+                ty,
+                loc,
+            }));
+            self.add_typedef(binding);
+        }
+        self.advance();
+    }
+
     fn peek_is_ty_name(&self) -> bool {
-        TY_KEYWORDS.contains(self.ctx.tok_source(self.peek()))
+        let name = self.peek_src();
+        TY_KEYWORDS.contains(name) || self.find_typedef(name).is_some()
     }
 
     // declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
@@ -512,6 +545,11 @@ impl<'a> Parser<'a> {
             self.advance();
             return Ty::char();
         }
+        if let Some(binding) = self.find_typedef(self.peek_src()) {
+            let ty = binding.borrow().ty.clone();
+            self.advance();
+            return ty;
+        }
 
         #[derive(PartialOrd, Ord, PartialEq, Eq)]
         enum DeclTy {
@@ -522,7 +560,7 @@ impl<'a> Parser<'a> {
         let mut decl_tys: Vec<DeclTy> = Vec::new();
         let loc = self.peek().loc;
 
-        while self.peek_is_ty_name() {
+        loop {
             if self.peek_is("short") {
                 decl_tys.push(Short);
             }
@@ -533,12 +571,16 @@ impl<'a> Parser<'a> {
                 decl_tys.push(Long);
             }
             else {
-                self.ctx.error_tok(self.peek(), "invalid type");
+                break;
             }
             self.advance();
         }
 
         decl_tys.sort();
+        if decl_tys.len() == 0 {
+            // TODO Warn on implicit int
+            return Ty::int();
+        }
         if decl_tys == [Short] || decl_tys == [Short, Int] {
             return Ty::short();
         }
@@ -575,7 +617,7 @@ impl<'a> Parser<'a> {
 
         let decl = match self.peek().kind {
             TokenKind::Ident => {
-                let name = self.ctx.tok_source(self.peek()).to_owned();
+                let name = self.peek_src().to_owned();
                 self.advance();
                 (self.type_suffix(ty), name)
             },
@@ -1071,6 +1113,10 @@ impl<'a> Parser<'a> {
 
                 if let Some(var_data) = self.find_binding(&name) {
                     let ty = var_data.borrow_mut().ty.clone();
+                    match var_data.borrow().kind {
+                        BindingKind::Typedef => self.ctx.error_at(&loc, "identifier bound to a typedef"),
+                        _ => {}
+                    }
                     let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), loc, ty };
                     return expr;
                 }
@@ -1178,6 +1224,23 @@ impl<'a> Parser<'a> {
         self.global_bindings.push(binding);
     }
 
+    fn add_typedef(&mut self, binding: SP<Binding>) {
+        self.scopes.last_mut().unwrap().add(binding);
+    }
+
+    fn find_typedef(&self, name: &[u8]) -> Option<&SP<Binding>> {
+        let binding_opt = self.find_binding(name);
+        match binding_opt {
+            None => binding_opt,
+            Some(binding) => {
+                match binding.borrow().kind {
+                    BindingKind::Typedef => binding_opt,
+                    _ => None
+                }
+            }
+        }
+    }
+
     fn add_tag(&mut self, binding: SP<Binding>) {
         self.scopes.last_mut().unwrap().add_tag(binding);
     }
@@ -1245,12 +1308,17 @@ impl<'a> Parser<'a> {
         }
         self.ctx.error_tok(self.peek(), "expected a number");
     }
+
     fn peek_is(&self, s: &str) -> bool {
-        self.ctx.tok_source(self.peek()).eq(s.as_bytes())
+        self.peek_src().eq(s.as_bytes())
     }
 
     fn la_is(&self, n: usize, s: &str) -> bool {
         self.ctx.tok_source(self.la(n)).eq(s.as_bytes())
+    }
+
+    fn peek_src(&self) -> &[u8] {
+        self.ctx.tok_source(self.peek())
     }
 
     fn skip(&mut self, s: &str) -> &Token {

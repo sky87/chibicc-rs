@@ -36,7 +36,8 @@ lazy_static! {
             "return",
             "if", "else",
             "for", "while",
-            "sizeof"
+            "sizeof",
+            "typedef"
         ].map(|k| k.as_bytes()).into();
         others.union(&TY_KEYWORDS).cloned().collect()
     };
