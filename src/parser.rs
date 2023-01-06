@@ -472,7 +472,10 @@ impl<'a> Parser<'a> {
     }
 
     fn peek_is_ty_name(&self) -> bool {
-        let name = self.peek_src();
+        self.is_ty_name(self.peek_src())
+    }
+
+    fn is_ty_name(&self, name: &[u8]) -> bool {
         TY_KEYWORDS.contains(name) || self.find_typedef(name).is_some()
     }
 
@@ -626,6 +629,35 @@ impl<'a> Parser<'a> {
 
         //println!("# DECL {}: {:?}", ascii(&decl.1), decl.0);
         decl
+    }
+
+    // abstract-declarator = "*"* ("(" abstract-declarator ")")? type-suffix
+    fn abstract_declarator(&mut self, base_ty: Rc<Ty>) -> Rc<Ty> {
+        let mut ty = base_ty;
+        while self.peek_is("*") {
+            self.advance();
+            ty = Ty::ptr(ty);
+        }
+
+        if self.peek_is("(") {
+            self.advance();
+            self.begin_speculation();
+            self.abstract_declarator(Ty::unit());
+            self.skip(")");
+            ty = self.type_suffix(ty);
+            let after_suffix = self.tok_index;
+            self.end_speculation();
+            let res = self.abstract_declarator(ty);
+            self.skip_to_tok(after_suffix);
+            return res;
+        }
+
+        self.type_suffix(ty)
+    }
+
+    fn typename(&mut self) -> Rc<Ty> {
+        let base_ty = self.declspec();
+        self.abstract_declarator(base_ty)
     }
 
     // type-suffix = "(" func-params
@@ -1066,6 +1098,7 @@ impl<'a> Parser<'a> {
 
     // primary = "(" "{" stmt+ "}" ")"
     //         | "(" expr ")"
+    //         | "sizeof" "(" type-name ")"
     //         | "sizeof" unary
     //         | ident func-args?
     //         | str
@@ -1077,10 +1110,17 @@ impl<'a> Parser<'a> {
                 return ExprNode { kind: ExprKind::Num(val), loc, ty: Ty::int() }
             },
             TokenKind::Keyword => {
+                let loc = self.peek().loc;
                 if self.peek_is("sizeof") {
                     self.advance();
+                    if self.peek_is("(") && self.is_ty_name(self.la_src(1)) {
+                        self.advance();
+                        let ty = self.typename();
+                        self.skip(")");
+                        return synth_num(ty.size.try_into().unwrap(), loc);
+                    }
                     let node = self.unary();
-                    return synth_num(node.ty.size.try_into().unwrap(), node.loc);
+                    return synth_num(node.ty.size.try_into().unwrap(), loc);
                 }
             }
             TokenKind::Str(ref str) => {
@@ -1319,6 +1359,10 @@ impl<'a> Parser<'a> {
 
     fn peek_src(&self) -> &[u8] {
         self.ctx.tok_source(self.peek())
+    }
+
+    fn la_src(&self, n: usize) -> &[u8] {
+        self.ctx.tok_source(self.la(n))
     }
 
     fn skip(&mut self, s: &str) -> &Token {
