@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Weak};
 
 use std::rc::Rc;
 
@@ -146,7 +146,7 @@ pub enum ExprKind {
     Lt(P<ExprNode>, P<ExprNode>),
     Le(P<ExprNode>, P<ExprNode>),
 
-    MemberAccess(P<ExprNode>, Rc<Member>),
+    MemberAccess(P<ExprNode>, Weak<Member>),
 
     Comma(Vec<P<ExprNode>>),
     StmtExpr(P<StmtNode>),
@@ -1090,7 +1090,7 @@ impl<'a> Parser<'a> {
 
         let ty = member.ty.clone();
         ExprNode {
-            kind: ExprKind::MemberAccess(Box::new(struct_node), member),
+            kind: ExprKind::MemberAccess(Box::new(struct_node), Rc::downgrade(&member)),
             loc,
             ty,
         }

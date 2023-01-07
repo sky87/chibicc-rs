@@ -436,7 +436,7 @@ impl<'a> Codegen<'a> {
             },
             ExprKind::MemberAccess(expr, member) => {
                 self.addr(expr);
-                wln!(self, "  add ${}, %rax", member.offset);
+                wln!(self, "  add ${}, %rax", member.upgrade().unwrap().offset);
             }
             _ => self.ctx.error_at(&expr.loc, "not an lvalue")
         };
