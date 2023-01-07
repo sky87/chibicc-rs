@@ -409,6 +409,7 @@ impl<'a> Codegen<'a> {
     fn addr(&mut self, expr: &ExprNode) {
         match &expr.kind {
             ExprKind::Var(data) => {
+                let data = data.upgrade().unwrap();
                 let data = data.borrow();
                 match &data.kind {
                     BindingKind::LocalVar { stack_offset } => {

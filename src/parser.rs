@@ -128,7 +128,7 @@ pub struct Binding {
 #[derive(Debug)]
 pub enum ExprKind {
     Num(i64),
-    Var(SP<Binding>),
+    Var(Weak<RefCell<Binding>>),
 
     Addr(P<ExprNode>),
     Deref(P<ExprNode>),
@@ -508,7 +508,7 @@ impl<'a> Parser<'a> {
             }
 
             self.advance();
-            let lhs = ExprNode { kind: ExprKind::Var(var_data), loc, ty };
+            let lhs = ExprNode { kind: ExprKind::Var(Rc::downgrade(&var_data)), loc, ty };
             let rhs = self.assign();
             let rhs_ty = rhs.ty.clone();
             stmts.push(StmtNode {
@@ -1136,7 +1136,7 @@ impl<'a> Parser<'a> {
                 }));
                 self.add_hidden_global(binding.clone());
                 return ExprNode {
-                    kind: ExprKind::Var(binding),
+                    kind: ExprKind::Var(Rc::downgrade(&binding)),
                     loc,
                     ty,
                 }
@@ -1157,7 +1157,7 @@ impl<'a> Parser<'a> {
                         BindingKind::Typedef => self.ctx.error_at(&loc, "identifier bound to a typedef"),
                         _ => {}
                     }
-                    let expr = ExprNode { kind: ExprKind::Var(var_data.clone()), loc, ty };
+                    let expr = ExprNode { kind: ExprKind::Var(Rc::downgrade(var_data)), loc, ty };
                     return expr;
                 }
                 else {
