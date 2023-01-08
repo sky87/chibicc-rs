@@ -78,7 +78,7 @@ impl Ty {
         }
     }
 
-    fn is_pointer_like(&self) -> bool {
+    pub fn is_pointer_like(&self) -> bool {
         match &self.kind {
             TyKind::Ptr(_) | TyKind::Array(_, _) => true,
             _ => false
@@ -833,7 +833,7 @@ impl<'a> Parser<'a> {
                 node = ExprNode {
                     kind: ExprKind::Eq(P::new(node), P::new(self.relational())),
                     loc,
-                    ty: Ty::int()
+                    ty: Ty::long()
                 };
             }
             else if self.peek_is("!=") {
@@ -841,7 +841,7 @@ impl<'a> Parser<'a> {
                 node = ExprNode {
                     kind: ExprKind::Ne(P::new(node), P::new(self.relational())),
                     loc,
-                    ty: Ty::int()
+                    ty: Ty::long()
                 };
             }
             else {
@@ -862,7 +862,7 @@ impl<'a> Parser<'a> {
                 node = ExprNode {
                     kind: ExprKind::Lt(P::new(node), P::new(self.add())),
                     loc,
-                    ty: Ty::int()
+                    ty: Ty::long()
                 };
             }
             else if self.peek_is("<=") {
@@ -870,7 +870,7 @@ impl<'a> Parser<'a> {
                 node = ExprNode {
                     kind: ExprKind::Le(P::new(node), P::new(self.add())),
                     loc,
-                    ty: Ty::int()
+                    ty: Ty::long()
                 };
             }
             else if self.peek_is(">") {
@@ -878,7 +878,7 @@ impl<'a> Parser<'a> {
                 node = ExprNode {
                     kind: ExprKind::Lt(P::new(self.add()), P::new(node)),
                     loc,
-                    ty: Ty::int()
+                    ty: Ty::long()
                 };
             }
             else if self.peek_is(">=") {
@@ -886,7 +886,7 @@ impl<'a> Parser<'a> {
                 node = ExprNode {
                     kind: ExprKind::Le(P::new(self.add()), P::new(node)),
                     loc,
-                    ty: Ty::int()
+                    ty: Ty::long()
                 };
             }
             else {
@@ -939,7 +939,7 @@ impl<'a> Parser<'a> {
         if lhs.ty.is_pointer_like() && rhs.ty.is_integer_like() {
             let base_ty = lhs.ty.base_ty().unwrap();
             let size = P::new(synth_num(base_ty.size.try_into().unwrap(), loc));
-            let rhs = synth_mul(size, rhs, loc);
+            let rhs = synth_mul(rhs, size, loc);
             return synth_add(lhs, P::new(rhs), loc)
         }
 
@@ -954,7 +954,7 @@ impl<'a> Parser<'a> {
         if lhs.ty.is_pointer_like() && rhs.ty.is_integer_like() {
             let base_ty = lhs.ty.base_ty().unwrap();
             let size = P::new(synth_num(base_ty.size.try_into().unwrap(), loc));
-            let rhs = synth_mul(size, rhs, loc);
+            let rhs = synth_mul(rhs, size, loc);
             return synth_sub(lhs, P::new(rhs), loc);
         }
 
@@ -962,7 +962,7 @@ impl<'a> Parser<'a> {
             let base_ty = lhs.ty.base_ty().unwrap();
             let size: i64 = base_ty.size.try_into().unwrap();
             let mut sub = synth_sub(lhs, rhs, loc);
-            sub.ty = Ty::int();
+            sub.ty = Ty::long();
             return synth_div(P::new(sub), P::new(synth_num(size, loc)), loc);
         }
 
@@ -1107,7 +1107,7 @@ impl<'a> Parser<'a> {
         match self.peek().kind {
             TokenKind::Num(val) => {
                 let loc = self.advance().loc;
-                return ExprNode { kind: ExprKind::Num(val), loc, ty: Ty::int() }
+                return ExprNode { kind: ExprKind::Num(val), loc, ty: Ty::long() }
             },
             TokenKind::Keyword => {
                 let loc = self.peek().loc;
@@ -1407,7 +1407,7 @@ impl<'a> Parser<'a> {
 }
 
 fn synth_num(v: i64, loc: SourceLocation) -> ExprNode {
-    ExprNode { kind: ExprKind::Num(v), loc, ty: Ty::int() }
+    ExprNode { kind: ExprKind::Num(v), loc, ty: Ty::long() }
 }
 
 fn synth_add(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {

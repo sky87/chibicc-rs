@@ -38,7 +38,7 @@
       "name": "test-program",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceRoot}/target/tests-c/arith",
+      "program": "${workspaceRoot}/tmp.exe",
       "args": [],
       "stopAtEntry": true,
       "cwd": "${workspaceFolder}",

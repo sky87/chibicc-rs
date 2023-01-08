@@ -1,4 +1,4 @@
-use std::{io::Write, ops::{Add, Sub, Div, Mul}, fmt::Display};
+use std::{io::Write, ops::{Add, Sub, Div, Mul}, fmt::Display, rc::Rc};
 
 use crate::{parser::{BindingKind, Function, StmtNode, StmtKind, ExprNode, ExprKind, SourceUnit, TyKind, Ty}, context::{Context, ascii}};
 
@@ -262,67 +262,72 @@ impl<'a> Codegen<'a> {
                 self.store(&node.ty);
             }
             ExprKind::Add(lhs, rhs) => {
-                self.expr(rhs.as_ref());
+                self.expr(rhs);
                 self.push();
-                self.expr(lhs.as_ref());
+                self.expr(lhs);
                 self.pop("%rdi");
-                wln!(self, "  add %rdi, %rax");
+                wln!(self, "  add {}, {}", data_reg(&lhs.ty), acc_reg(&lhs.ty));
             }
             ExprKind::Sub(lhs, rhs) => {
-                self.expr(rhs.as_ref());
+                self.expr(rhs);
                 self.push();
-                self.expr(lhs.as_ref());
+                self.expr(lhs);
                 self.pop("%rdi");
-                wln!(self, "  sub %rdi, %rax");
+                wln!(self, "  sub {}, {}", data_reg(&lhs.ty), acc_reg(&lhs.ty));
             }
             ExprKind::Mul(lhs, rhs) => {
-                self.expr(rhs.as_ref());
+                self.expr(rhs);
                 self.push();
-                self.expr(lhs.as_ref());
+                self.expr(lhs);
                 self.pop("%rdi");
-                wln!(self, "  imul %rdi, %rax");
+                wln!(self, "  imul {}, {}", data_reg(&lhs.ty), acc_reg(&lhs.ty));
             }
             ExprKind::Div(lhs, rhs) => {
-                self.expr(rhs.as_ref());
+                self.expr(rhs);
                 self.push();
-                self.expr(lhs.as_ref());
+                self.expr(lhs);
                 self.pop("%rdi");
-                wln!(self, "  cqo");
-                wln!(self, "  idiv %rdi, %rax");
+                if lhs.ty.size == 8 {
+                    wln!(self, "  cqo");
+                }
+                else {
+                    wln!(self, "  cdq");
+                }
+                wln!(self, "  idiv {}", data_reg(&lhs.ty));
             }
             ExprKind::Eq(lhs, rhs) => {
-                self.expr(rhs.as_ref());
+                self.expr(rhs);
                 self.push();
-                self.expr(lhs.as_ref());
+                self.expr(lhs);
                 self.pop("%rdi");
-                wln!(self, "  cmp %rdi, %rax");
+                wln!(self, "  cmp {}, {}", data_reg(&lhs.ty), acc_reg(&lhs.ty));
                 wln!(self, "  sete %al");
                 wln!(self, "  movzb %al, %rax");
             }
             ExprKind::Ne(lhs, rhs) => {
-                self.expr(rhs.as_ref());
+                self.expr(rhs);
                 self.push();
-                self.expr(lhs.as_ref());
+                self.expr(lhs);
                 self.pop("%rdi");
-                wln!(self, "  cmp %rdi, %rax");
+                wln!(self, "  cmp {}, {}", data_reg(&lhs.ty), acc_reg(&lhs.ty));
                 wln!(self, "  setne %al");
                 wln!(self, "  movzb %al, %rax");
             }
             ExprKind::Le(lhs, rhs) => {
-                self.expr(rhs.as_ref());
+                self.expr(rhs);
                 self.push();
-                self.expr(lhs.as_ref());
+                self.expr(lhs);
                 self.pop("%rdi");
-                wln!(self, "  cmp %rdi, %rax");
+                wln!(self, "  cmp {}, {}", data_reg(&lhs.ty), acc_reg(&lhs.ty));
                 wln!(self, "  setle %al");
                 wln!(self, "  movzb %al, %rax");
             }
             ExprKind::Lt(lhs, rhs) => {
-                self.expr(rhs.as_ref());
+                self.expr(rhs);
                 self.push();
-                self.expr(lhs.as_ref());
+                self.expr(lhs);
                 self.pop("%rdi");
-                wln!(self, "  cmp %rdi, %rax");
+                wln!(self, "  cmp {}, {}", data_reg(&lhs.ty), acc_reg(&lhs.ty));
                 wln!(self, "  setl %al");
                 wln!(self, "  movzb %al, %rax");
             }
@@ -452,6 +457,20 @@ impl<'a> Codegen<'a> {
         if self.depth != 0 {
             panic!("depth is not 0");
         }
+    }
+}
+
+fn data_reg(ty: &Rc<Ty>) -> &str {
+    match ty.kind {
+        TyKind::Long | TyKind::Ptr(_) | TyKind::Array(_, _) => "%rdi",
+        _ => "%edi",
+    }
+}
+
+fn acc_reg(ty: &Rc<Ty>) -> &str {
+    match ty.kind {
+        TyKind::Long | TyKind::Ptr(_) | TyKind::Array(_, _) => "%rax",
+        _ => "%eax",
     }
 }
 
