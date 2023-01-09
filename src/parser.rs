@@ -133,6 +133,8 @@ pub enum ExprKind {
     Addr(P<ExprNode>),
     Deref(P<ExprNode>),
 
+    Cast(P<ExprNode>),
+
     Funcall(AsciiStr, Vec<P<ExprNode>>),
 
     Add(P<ExprNode>, P<ExprNode>),
@@ -969,16 +971,16 @@ impl<'a> Parser<'a> {
         self.ctx.error_at(&loc, "invalid operands");
     }
 
-    // mul = unary ("*" unary | "/" unary)*
+    // mul = cast ("*" cast | "/" cast)*
     fn mul(&mut self) -> ExprNode {
-        let mut node = self.unary();
+        let mut node = self.cast();
 
         loop {
             if self.peek_is("*") {
                 let loc = self.advance().loc;
                 let ty = node.ty.clone();
                 node = ExprNode {
-                    kind: ExprKind::Mul(P::new(node), P::new(self.unary())),
+                    kind: ExprKind::Mul(P::new(node), P::new(self.cast())),
                     loc,
                     ty
                 };
@@ -987,7 +989,7 @@ impl<'a> Parser<'a> {
                 let loc = self.advance().loc;
                 let ty = node.ty.clone();
                 node = ExprNode {
-                    kind: ExprKind::Div(P::new(node), P::new(self.unary())),
+                    kind: ExprKind::Div(P::new(node), P::new(self.cast())),
                     loc,
                     ty
                 };
@@ -1000,24 +1002,40 @@ impl<'a> Parser<'a> {
         node
     }
 
-    // unary = ("+" | "-" | "*" | "&") unary
+    // cast = "(" type-name ")" cast | unary
+    fn cast(&mut self) -> ExprNode {
+        if self.peek_is("(") && self.is_ty_name(self.la_src(1)) {
+            let loc = self.peek().loc;
+            self.advance();
+            let ty = self.typename();
+            self.skip(")");
+            return ExprNode {
+                kind: ExprKind::Cast(P::new(self.cast())),
+                loc,
+                ty,
+            }
+        }
+        self.unary()
+    }
+
+    // unary = ("+" | "-" | "*" | "&") cast
     //       | postfix
     fn unary(&mut self) -> ExprNode {
         if self.peek_is("+") {
             self.advance();
-            return self.unary()
+            return self.cast()
         }
 
         if self.peek_is("-") {
             let loc = self.advance().loc;
-            let node = P::new(self.unary());
+            let node = P::new(self.cast());
             let ty = node.ty.clone();
             return ExprNode { kind: ExprKind::Neg(node), loc, ty }
         }
 
         if self.peek_is("&") {
             let loc = self.advance().loc;
-            let node = P::new(self.unary());
+            let node = P::new(self.cast());
             let ty = match &node.ty.kind {
                 TyKind::Array(base_ty, _) => Ty::ptr(base_ty.clone()),
                 _ => Ty::ptr(node.ty.clone())
@@ -1027,7 +1045,7 @@ impl<'a> Parser<'a> {
 
         if self.peek_is("*") {
             let loc = self.advance().loc;
-            let node = self.unary();
+            let node = self.cast();
             return self.synth_deref(P::new(node), loc);
         }
 

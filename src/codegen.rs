@@ -342,6 +342,12 @@ impl<'a> Codegen<'a> {
                         self.stmt(stmt);
                     }
                 }
+            },
+            ExprKind::Cast(expr) => {
+                self.expr(expr);
+                if let Some(instr) = cast_instr(&expr.ty, &node.ty) {
+                    wln!(self, "  {}", instr);
+                }
             }
         };
     }
@@ -473,6 +479,49 @@ fn acc_reg(ty: &Rc<Ty>) -> &str {
         _ => "%eax",
     }
 }
+
+// Casting
+
+enum CastType {
+    I8 = 0, I16, I32, I64
+}
+
+lazy_static! {
+    static ref CAST_TABLE: [[Option<&'static str>;4];4] = {
+        let i32i8  = Some("movsbl %al, %eax");
+        let i32i16 = Some("movswl %ax, %eax");
+        let i32i64 = Some("movsxd %eax, %rax");
+        [
+            [  None,   None, None, i32i64],
+            [ i32i8,   None, None, i32i64],
+            [ i32i8, i32i16, None, i32i64],
+            [ i32i8, i32i16, None,   None],
+        ]
+    };
+}
+
+fn to_cast_type(ty: &Ty) -> CastType {
+    use CastType::*;
+    match ty.kind {
+        TyKind::Char => I8,
+        TyKind::Short => I16,
+        TyKind::Int => I32,
+        _ => I64
+    }
+}
+
+fn cast_instr(from: &Ty, to: &Ty) -> Option<&'static str> {
+    match to.kind {
+        TyKind::Unit => None,
+        _ => {
+            let from_index = to_cast_type(from) as usize;
+            let to_index = to_cast_type(to) as usize;
+            CAST_TABLE[from_index][to_index]
+        }
+    }
+}
+
+// Alignment
 
 pub trait Alignable : Display + Copy + Add<Output=Self> + Sub<Output=Self> + Div<Output=Self> + Mul<Output=Self> {
     fn one() -> Self;
