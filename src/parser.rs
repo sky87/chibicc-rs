@@ -812,15 +812,11 @@ impl<'a> Parser<'a> {
     // assign = equality ("=" assign)?
     fn assign(&mut self) -> ExprNode {
         let mut node = self.equality();
+
         if self.peek_is("=") {
             let loc = self.advance().loc;
             let rhs = P::new(self.assign());
-            let ty = node.ty.clone();
-            node = ExprNode {
-                kind: ExprKind::Assign(P::new(node), rhs),
-                loc,
-                ty
-            };
+            node = self.synth_assign(P::new(node), rhs, loc);
         }
         node
     }
@@ -832,19 +828,21 @@ impl<'a> Parser<'a> {
         loop {
             if self.peek_is("==") {
                 let loc = self.advance().loc;
-                node = ExprNode {
-                    kind: ExprKind::Eq(P::new(node), P::new(self.relational())),
-                    loc,
-                    ty: Ty::long()
-                };
+                // node = ExprNode {
+                //     kind: ExprKind::Eq(P::new(node), P::new(self.relational())),
+                //     loc,
+                //     ty: Ty::long()
+                // };
+                node = synth_eq(P::new(node), P::new(self.relational()), loc)
             }
             else if self.peek_is("!=") {
                 let loc = self.advance().loc;
-                node = ExprNode {
-                    kind: ExprKind::Ne(P::new(node), P::new(self.relational())),
-                    loc,
-                    ty: Ty::long()
-                };
+                // node = ExprNode {
+                //     kind: ExprKind::Ne(P::new(node), P::new(self.relational())),
+                //     loc,
+                //     ty: Ty::long()
+                // };
+                node = synth_ne(P::new(node), P::new(self.relational()), loc)
             }
             else {
                 break;
@@ -861,35 +859,39 @@ impl<'a> Parser<'a> {
         loop {
             if self.peek_is("<") {
                 let loc = self.advance().loc;
-                node = ExprNode {
-                    kind: ExprKind::Lt(P::new(node), P::new(self.add())),
-                    loc,
-                    ty: Ty::long()
-                };
+                // node = ExprNode {
+                //     kind: ExprKind::Lt(P::new(node), P::new(self.add())),
+                //     loc,
+                //     ty: Ty::long()
+                // };
+                node = synth_lt(P::new(node), P::new(self.add()), loc);
             }
             else if self.peek_is("<=") {
                 let loc = self.advance().loc;
-                node = ExprNode {
-                    kind: ExprKind::Le(P::new(node), P::new(self.add())),
-                    loc,
-                    ty: Ty::long()
-                };
+                // node = ExprNode {
+                //     kind: ExprKind::Le(P::new(node), P::new(self.add())),
+                //     loc,
+                //     ty: Ty::long()
+                // };
+                node = synth_le(P::new(node), P::new(self.add()), loc);
             }
             else if self.peek_is(">") {
                 let loc = self.advance().loc;
-                node = ExprNode {
-                    kind: ExprKind::Lt(P::new(self.add()), P::new(node)),
-                    loc,
-                    ty: Ty::long()
-                };
+                // node = ExprNode {
+                //     kind: ExprKind::Lt(P::new(self.add()), P::new(node)),
+                //     loc,
+                //     ty: Ty::long()
+                // };
+                node = synth_lt(P::new(self.add()), P::new(node), loc);
             }
             else if self.peek_is(">=") {
                 let loc = self.advance().loc;
-                node = ExprNode {
-                    kind: ExprKind::Le(P::new(self.add()), P::new(node)),
-                    loc,
-                    ty: Ty::long()
-                };
+                // node = ExprNode {
+                //     kind: ExprKind::Le(P::new(self.add()), P::new(node)),
+                //     loc,
+                //     ty: Ty::long()
+                // };
+                node = synth_le(P::new(self.add()), P::new(node), loc);
             }
             else {
                 break;
@@ -940,7 +942,7 @@ impl<'a> Parser<'a> {
 
         if lhs.ty.is_pointer_like() && rhs.ty.is_integer_like() {
             let base_ty = lhs.ty.base_ty().unwrap();
-            let size = P::new(synth_num(base_ty.size.try_into().unwrap(), loc));
+            let size = P::new(synth_long(base_ty.size.try_into().unwrap(), loc));
             let rhs = synth_mul(rhs, size, loc);
             return synth_add(lhs, P::new(rhs), loc)
         }
@@ -955,7 +957,7 @@ impl<'a> Parser<'a> {
 
         if lhs.ty.is_pointer_like() && rhs.ty.is_integer_like() {
             let base_ty = lhs.ty.base_ty().unwrap();
-            let size = P::new(synth_num(base_ty.size.try_into().unwrap(), loc));
+            let size = P::new(synth_long(base_ty.size.try_into().unwrap(), loc));
             let rhs = synth_mul(rhs, size, loc);
             return synth_sub(lhs, P::new(rhs), loc);
         }
@@ -965,7 +967,7 @@ impl<'a> Parser<'a> {
             let size: i64 = base_ty.size.try_into().unwrap();
             let mut sub = synth_sub(lhs, rhs, loc);
             sub.ty = Ty::long();
-            return synth_div(P::new(sub), P::new(synth_num(size, loc)), loc);
+            return synth_div(P::new(sub), P::new(synth_long(size, loc)), loc);
         }
 
         self.ctx.error_at(&loc, "invalid operands");
@@ -978,21 +980,11 @@ impl<'a> Parser<'a> {
         loop {
             if self.peek_is("*") {
                 let loc = self.advance().loc;
-                let ty = node.ty.clone();
-                node = ExprNode {
-                    kind: ExprKind::Mul(P::new(node), P::new(self.cast())),
-                    loc,
-                    ty
-                };
+                node = synth_mul(P::new(node), P::new(self.cast()), loc);
             }
             else if self.peek_is("/") {
                 let loc = self.advance().loc;
-                let ty = node.ty.clone();
-                node = ExprNode {
-                    kind: ExprKind::Div(P::new(node), P::new(self.cast())),
-                    loc,
-                    ty
-                };
+                node = synth_div(P::new(node), P::new(self.cast()), loc);
             }
             else {
                 break;
@@ -1029,7 +1021,7 @@ impl<'a> Parser<'a> {
         if self.peek_is("-") {
             let loc = self.advance().loc;
             let node = P::new(self.cast());
-            let ty = node.ty.clone();
+            let ty = get_common_type(&Ty::int(), &node.ty);
             return ExprNode { kind: ExprKind::Neg(node), loc, ty }
         }
 
@@ -1125,7 +1117,9 @@ impl<'a> Parser<'a> {
         match self.peek().kind {
             TokenKind::Num(val) => {
                 let loc = self.advance().loc;
-                return ExprNode { kind: ExprKind::Num(val), loc, ty: Ty::long() }
+                let i32_conv: Result<i32, _> = val.try_into();
+                let ty = i32_conv.map_or(Ty::long(), |_| Ty::int());
+                return ExprNode { kind: ExprKind::Num(val), loc, ty }
             },
             TokenKind::Keyword => {
                 let loc = self.peek().loc;
@@ -1135,10 +1129,10 @@ impl<'a> Parser<'a> {
                         self.advance();
                         let ty = self.typename();
                         self.skip(")");
-                        return synth_num(ty.size.try_into().unwrap(), loc);
+                        return synth_long(ty.size.try_into().unwrap(), loc);
                     }
                     let node = self.unary();
-                    return synth_num(node.ty.size.try_into().unwrap(), loc);
+                    return synth_long(node.ty.size.try_into().unwrap(), loc);
                 }
             }
             TokenKind::Str(ref str) => {
@@ -1412,6 +1406,16 @@ impl<'a> Parser<'a> {
         ExprNode { kind: ExprKind::Deref(expr), loc, ty }
     }
 
+    fn synth_assign(&self, lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
+        let rhs = match lhs.ty.kind {
+            TyKind::Array(_, _) => self.ctx.error_at(&loc, "not an l value"),
+            TyKind::Struct(_) => rhs,
+            _ => P::new(synth_cast(rhs, lhs.ty.clone()))
+        };
+        let ty = lhs.ty.clone();
+        ExprNode { kind: ExprKind::Assign(lhs, rhs), loc, ty }
+    }
+
     fn mk_unique_id(&mut self, prefix: &str) -> AsciiStr {
         let res = format!("{}{}", prefix, self.next_unique_id);
         self.next_unique_id += 1;
@@ -1424,28 +1428,61 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn synth_num(v: i64, loc: SourceLocation) -> ExprNode {
+fn synth_long(v: i64, loc: SourceLocation) -> ExprNode {
     ExprNode { kind: ExprKind::Num(v), loc, ty: Ty::long() }
 }
 
 fn synth_add(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
+    let (lhs, rhs) = usual_arith_conv(lhs, rhs);
     let ty = lhs.ty.clone();
     ExprNode { kind: ExprKind::Add(lhs, rhs), loc, ty }
 }
 
 fn synth_mul(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
+    let (lhs, rhs) = usual_arith_conv(lhs, rhs);
     let ty = lhs.ty.clone();
     ExprNode { kind: ExprKind::Mul(lhs, rhs), loc, ty }
 }
 
 fn synth_sub(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
+    let (lhs, rhs) = usual_arith_conv(lhs, rhs);
     let ty = lhs.ty.clone();
     ExprNode { kind: ExprKind::Sub(lhs, rhs), loc, ty }
 }
 
 fn synth_div(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
+    let (lhs, rhs) = usual_arith_conv(lhs, rhs);
     let ty = lhs.ty.clone();
     ExprNode { kind: ExprKind::Div(lhs, rhs), loc, ty }
+}
+
+fn synth_eq(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
+    let (lhs, rhs) = usual_arith_conv(lhs, rhs);
+    let ty = lhs.ty.clone();
+    ExprNode { kind: ExprKind::Eq(lhs, rhs), loc, ty }
+}
+
+fn synth_ne(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
+    let (lhs, rhs) = usual_arith_conv(lhs, rhs);
+    let ty = lhs.ty.clone();
+    ExprNode { kind: ExprKind::Ne(lhs, rhs), loc, ty }
+}
+
+fn synth_lt(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
+    let (lhs, rhs) = usual_arith_conv(lhs, rhs);
+    let ty = lhs.ty.clone();
+    ExprNode { kind: ExprKind::Lt(lhs, rhs), loc, ty }
+}
+
+fn synth_le(lhs: P<ExprNode>, rhs: P<ExprNode>, loc: SourceLocation) -> ExprNode {
+    let (lhs, rhs) = usual_arith_conv(lhs, rhs);
+    let ty = lhs.ty.clone();
+    ExprNode { kind: ExprKind::Le(lhs, rhs), loc, ty }
+}
+
+fn synth_cast(expr: P<ExprNode>, ty: Rc<Ty>) -> ExprNode {
+    let loc = expr.loc;
+    ExprNode { kind: ExprKind::Cast(expr), loc, ty }
 }
 
 fn get_base_ty(ty: &Rc<Ty>) -> Option<&Rc<Ty>> {
@@ -1465,3 +1502,24 @@ fn reset_vec_len<E>(v: &mut Vec<E>, new_len: usize, name: &str) {
     }
     v.truncate(new_len)
 }
+
+// Usual arithmetic conversion
+
+fn get_common_type(ty1: &Rc<Ty>, ty2: &Rc<Ty>) -> Rc<Ty> {
+    if let Some(base_ty) = get_base_ty(ty1) {
+        return Ty::ptr(base_ty.clone());
+    }
+    if ty1.size == 8 || ty2.size == 8 {
+        return Ty::long();
+    }
+    Ty::int()
+}
+
+fn usual_arith_conv(lhs: P<ExprNode>, rhs: P<ExprNode>) -> (P<ExprNode>, P<ExprNode>) {
+    let ty = get_common_type(&lhs.ty, &rhs.ty);
+    (
+        P::new(synth_cast(lhs, ty.clone())),
+        P::new(synth_cast(rhs, ty))
+    )
+}
+

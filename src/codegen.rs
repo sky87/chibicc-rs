@@ -365,11 +365,16 @@ impl<'a> Codegen<'a> {
             _ => {},
         }
 
+        // When we load a char or a short value to a register, we always
+        // extend them to the size of int, so we can assume the lower half of
+        // a register always contains a valid value. The upper half of a
+        // register for char, short and int may contain garbage. When we load
+        // a long value to a register, it simply occupies the entire register.
         if ty.size == 1 {
-            wln!(self, "  movsbq (%rax), %rax");
+            wln!(self, "  movsbl (%rax), %eax");
         }
         else if ty.size == 2 {
-            wln!(self, "  movswq (%rax), %rax");
+            wln!(self, "  movswl (%rax), %eax");
         }
         else if ty.size == 4 {
             wln!(self, "  movsxd (%rax), %rax");
