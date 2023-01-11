@@ -338,7 +338,17 @@ impl<'a> Parser<'a> {
             return;
         }
 
+        self.enter_scope();
+        self.add_local(Rc::new(RefCell::new(Binding {
+            kind: BindingKind::Decl,
+            name: name.clone(),
+            ty: ty.clone(),
+            loc
+        })));
+
         let body = self.compound_stmt();
+
+        self.exit_scope();
         // Reverse them to keep the locals layout in line with chibicc
         let locals: Vec<SP<Binding>> = self.cur_fn_local_bindings.clone().into_iter().rev().collect();
         self.add_global(Rc::new(RefCell::new(Binding {
@@ -1224,6 +1234,19 @@ impl<'a> Parser<'a> {
         let fn_name = self.ctx.tok_source(tok).to_owned();
         self.advance();
 
+        let ty = if let Some(binding) = self.find_binding(&fn_name) {
+            let binding = binding.borrow();
+            if let TyKind::Fn(ret_ty, _) = &binding.ty.kind {
+                ret_ty.clone()
+            }
+            else {
+                self.ctx.error_at(&loc, "not a function");
+            }
+        }
+        else {
+            self.ctx.error_at(&loc, "implicit declaration of a function");
+        };
+
         let mut args = Vec::new();
         self.skip("(");
         while !self.peek_is(")") {
@@ -1237,7 +1260,7 @@ impl<'a> Parser<'a> {
         ExprNode {
             kind: ExprKind::Funcall(fn_name, args),
             loc,
-            ty: Ty::long(),
+            ty,
         }
     }
 
