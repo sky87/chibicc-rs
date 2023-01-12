@@ -236,7 +236,10 @@ pub struct Parser<'a> {
     next_unique_id: u64,
 
     // Speculation
-    checkpoint_stack: Vec<ParserCheckpoint>
+    checkpoint_stack: Vec<ParserCheckpoint>,
+
+    // Unsaved state
+    cur_fn_ty: Rc<Ty>
 }
 
 impl<'a> Parser<'a> {
@@ -262,6 +265,9 @@ impl<'a> Parser<'a> {
 
             // Speculation
             checkpoint_stack: Vec::new(),
+
+            // Unsaved state
+            cur_fn_ty: Ty::unit()
         }
     }
 
@@ -325,6 +331,8 @@ impl<'a> Parser<'a> {
         let base_ty = self.declspec();
         let (ty, name) = self.declarator(base_ty);
 
+        self.cur_fn_ty = ty.clone();
+
         let params = self.cur_fn_local_bindings.clone();
 
         if self.peek_is(";") {
@@ -377,7 +385,15 @@ impl<'a> Parser<'a> {
             let loc = self.advance().loc;
             let expr = self.expr();
             self.skip(";");
-            return StmtNode { kind: StmtKind::Return(expr), loc, ty: Ty::unit() }
+            let ret_ty = match &self.cur_fn_ty.kind {
+                TyKind::Fn(ret_ty, _) => ret_ty,
+                _ => panic!("cur_fn_ty is not of kind Fn")
+            };
+            return StmtNode {
+                kind: StmtKind::Return(synth_cast(P::new(expr), ret_ty.clone())),
+                loc,
+                ty: Ty::unit()
+            }
         }
 
         if self.peek_is("if") {
