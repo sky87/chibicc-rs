@@ -91,6 +91,13 @@ impl Ty {
             _ => None
         }
     }
+
+    fn is_tagged(&self) -> bool {
+        match &self.kind {
+            TyKind::Struct(_) | TyKind::Union(_) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1250,17 +1257,13 @@ impl<'a> Parser<'a> {
         let fn_name = self.ctx.tok_source(tok).to_owned();
         self.advance();
 
-        let ty = if let Some(binding) = self.find_binding(&fn_name) {
-            let binding = binding.borrow();
-            if let TyKind::Fn(ret_ty, _) = &binding.ty.kind {
-                ret_ty.clone()
-            }
-            else {
-                self.ctx.error_at(&loc, "not a function");
-            }
+        let fn_binding = self.find_binding_or_die(&fn_name, &loc).clone();
+        let fn_binding = fn_binding.borrow();
+        let (ret_ty, param_tys) = if let TyKind::Fn(ret_ty, param_tys) = &fn_binding.ty.kind {
+            (ret_ty, param_tys)
         }
         else {
-            self.ctx.error_at(&loc, "implicit declaration of a function");
+            self.ctx.error_at(&loc, "not a function");
         };
 
         let mut args = Vec::new();
@@ -1269,14 +1272,29 @@ impl<'a> Parser<'a> {
             if args.len() > 0 {
                 self.skip(",");
             }
-            args.push(P::new(self.assign()));
+
+            let arg = P::new(self.assign());
+
+            let arg = if args.len() < param_tys.len() {
+                let param_ty = &param_tys[args.len()];
+                if param_ty.is_tagged() {
+                    self.ctx.error_at(&loc, "passing structs or unions is unsupported");
+                }
+                P::new(synth_cast(arg,  param_ty.clone()))
+            }
+            else {
+                arg
+            };
+
+            args.push(arg);
         }
+
         self.skip(")");
 
         ExprNode {
             kind: ExprKind::Funcall(fn_name, args),
             loc,
-            ty,
+            ty: ret_ty.clone(),
         }
     }
 
@@ -1288,6 +1306,15 @@ impl<'a> Parser<'a> {
             }
         }
         None
+    }
+
+    fn find_binding_or_die(&self, name: &[u8], loc: &SourceLocation) -> &SP<Binding> {
+        if let Some(binding) = self.find_binding(&name) {
+            binding
+        }
+        else {
+            self.ctx.error_at(loc, "unbound name");
+        }
     }
 
     fn enter_scope(&mut self) {
