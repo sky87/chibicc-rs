@@ -28,7 +28,7 @@ pub struct Token {
 
 lazy_static! {
     pub static ref TY_KEYWORDS: HashSet<&'static [u8]> = [
-        "void", "char", "short", "int", "long", "struct", "union"
+        "void", "_Bool", "char", "short", "int", "long", "struct", "union"
     ].map(|k| k.as_bytes()).into();
 
     static ref KEYWORDS: HashSet<&'static [u8]> = {

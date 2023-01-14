@@ -345,11 +345,34 @@ impl<'a> Codegen<'a> {
             },
             ExprKind::Cast(expr) => {
                 self.expr(expr);
-                if let Some(instr) = cast_instr(&expr.ty, &node.ty) {
-                    wln!(self, "  {}", instr);
+
+                let from = &expr.ty;
+                let to = &node.ty;
+
+                match to.kind {
+                    TyKind::Unit => {},
+                    TyKind::Bool => {
+                        self.cmp_zero(from);
+                        wln!(self, "  setne %al");
+                        wln!(self, "  movzx %al, %eax");
+                    }
+                    _ => {
+                        let from_index = to_cast_type(from) as usize;
+                        let to_index = to_cast_type(to) as usize;
+                        CAST_TABLE[from_index][to_index].map(|instr| wln!(self, "  {}", instr));
+                    }
                 }
             }
         };
+    }
+
+    fn cmp_zero(&mut self, ty: &Ty) {
+        if ty.is_integer_like() && ty.size <= 4 {
+            wln!(self, "  cmp $0, %eax");
+        }
+        else {
+            wln!(self, "  cmp $0, %rax");
+        }
     }
 
     fn load(&mut self, ty: &Ty) {
@@ -512,17 +535,6 @@ fn to_cast_type(ty: &Ty) -> CastType {
         TyKind::Short => I16,
         TyKind::Int => I32,
         _ => I64
-    }
-}
-
-fn cast_instr(from: &Ty, to: &Ty) -> Option<&'static str> {
-    match to.kind {
-        TyKind::Unit => None,
-        _ => {
-            let from_index = to_cast_type(from) as usize;
-            let to_index = to_cast_type(to) as usize;
-            CAST_TABLE[from_index][to_index]
-        }
     }
 }
 

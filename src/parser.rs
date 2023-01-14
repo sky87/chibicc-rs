@@ -9,6 +9,7 @@ pub type SP<A> = Rc<RefCell<A>>;
 
 #[derive(Debug)]
 pub enum TyKind {
+    Bool,
     Char,
     Short,
     Int,
@@ -36,6 +37,7 @@ pub struct Ty {
 }
 
 impl Ty {
+    fn bool() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Bool, size: 1, align: 1 }) }
     fn char() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Char, size: 1, align: 1 }) }
     fn short() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Short, size: 2, align: 2 }) }
     fn int() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Int, size: 4, align: 4 }) }
@@ -71,9 +73,9 @@ impl Ty {
         Rc::new(Ty { kind: TyKind::Union(members.into_iter().map(|m| Rc::new(m)).collect()), size, align })
     }
 
-    fn is_integer_like(&self) -> bool {
+    pub fn is_integer_like(&self) -> bool {
         match &self.kind {
-            TyKind::Char | TyKind::Short | TyKind::Int | TyKind::Long => true,
+            TyKind::Bool | TyKind::Char | TyKind::Short | TyKind::Int | TyKind::Long => true,
             _ => false,
         }
     }
@@ -92,7 +94,7 @@ impl Ty {
         }
     }
 
-    fn is_tagged(&self) -> bool {
+    fn is_tag_like(&self) -> bool {
         match &self.kind {
             TyKind::Struct(_) | TyKind::Union(_) => true,
             _ => false,
@@ -545,20 +547,15 @@ impl<'a> Parser<'a> {
             self.advance();
             let lhs = ExprNode { kind: ExprKind::Var(Rc::downgrade(&var_data)), loc, ty };
             let rhs = self.assign();
-            let rhs_ty = rhs.ty.clone();
             stmts.push(StmtNode {
-                kind: StmtKind::Expr(ExprNode {
-                    kind: ExprKind::Assign(P::new(lhs), P::new(rhs)),
-                    loc,
-                    ty: rhs_ty,
-                }),
+                kind: StmtKind::Expr(self.synth_assign(P::new(lhs), P::new(rhs), loc)),
                 loc,
                 ty: Ty::unit()
             });
         }
     }
 
-    // declspec = struct-decl | union-decl | "void" | "char" | ("short" | "int" | "long")+
+    // declspec = struct-decl | union-decl | "void" | "_Bool" | "char" | ("short" | "int" | "long")+
     //
     // The order of typenames in a type-specifier doesn't matter. For
     // example, `int long static` means the same as `static long int`.
@@ -578,6 +575,10 @@ impl<'a> Parser<'a> {
         if self.peek_is("void") {
             self.advance();
             return Ty::unit();
+        }
+        if self.peek_is("_Bool") {
+            self.advance();
+            return Ty::bool();
         }
         if self.peek_is("char") {
             self.advance();
@@ -1277,7 +1278,7 @@ impl<'a> Parser<'a> {
 
             let arg = if args.len() < param_tys.len() {
                 let param_ty = &param_tys[args.len()];
-                if param_ty.is_tagged() {
+                if param_ty.is_tag_like() {
                     self.ctx.error_at(&loc, "passing structs or unions is unsupported");
                 }
                 P::new(synth_cast(arg,  param_ty.clone()))
