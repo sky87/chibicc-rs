@@ -1,4 +1,4 @@
-use std::{collections::HashSet};
+use std::collections::HashSet;
 
 use crate::context::{Context, AsciiStr};
 
@@ -178,6 +178,37 @@ impl<'a> Lexer<'a> {
                 length: self.len(&loc),
                 kind: TokenKind::Str(str),
             };
+        }
+        else if c == b'\'' {
+            self.advance();
+
+            if self.peek() == 0 {
+                self.ctx.error_at(&loc, "unclosed charater literal");
+            }
+
+            let v = if self.peek() == b'\\' {
+                let escape_loc = self.loc(); // wastefull...
+                self.advance();
+                let (v, len) = self.read_escaped_char(self.rest(), &escape_loc);
+                self.nadvance(len);
+                v
+            }
+            else {
+                let v = self.peek();
+                self.advance();
+                v
+            } as i8;
+
+            if self.peek() != b'\'' {
+                self.ctx.error_at(&loc, "unclosed charater literal");
+            }
+            self.advance();
+
+            return Token {
+                loc,
+                length: self.len(&loc),
+                kind: TokenKind::Num(v.into())
+            }
         }
         else {
             let punct_len = read_punct(self.rest());
