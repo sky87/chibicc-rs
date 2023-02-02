@@ -14,6 +14,7 @@ pub enum TyKind {
     Short,
     Int,
     Long,
+    Enum,
     Ptr(Rc<Ty>),
     Fn(Rc<Ty>, Vec<Rc<Ty>>),
     Array(Rc<Ty>, usize),
@@ -42,6 +43,7 @@ impl Ty {
     fn short() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Short, size: 2, align: 2 }) }
     fn int() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Int, size: 4, align: 4 }) }
     fn long() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Long, size: 8, align: 8 }) }
+    fn enm() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Enum, size: 4, align: 4 }) }
     fn unit() -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Unit, size: 1, align: 1 }) }
     fn ptr(base: Rc<Ty>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Ptr(base), size: 8, align: 8 }) }
     fn func(ret: Rc<Ty>, params: Vec<Rc<Ty>>) -> Rc<Ty> { Rc::new(Ty { kind: TyKind::Fn(ret, params), size: 0, align: 1 }) }
@@ -75,7 +77,7 @@ impl Ty {
 
     pub fn is_integer_like(&self) -> bool {
         match &self.kind {
-            TyKind::Bool | TyKind::Char | TyKind::Short | TyKind::Int | TyKind::Long => true,
+            TyKind::Bool | TyKind::Char | TyKind::Short | TyKind::Int | TyKind::Long | TyKind::Enum => true,
             _ => false,
         }
     }
@@ -121,6 +123,7 @@ pub struct Function {
 pub enum BindingKind {
     Decl,
     Typedef,
+    EnumConst(i32),
     GlobalVar { init_data: Option<Vec<u8>> },
     LocalVar { stack_offset: i64 },
     Function(Function),
@@ -503,7 +506,7 @@ impl<'a> Parser<'a> {
                 ty,
                 loc,
             }));
-            self.add_typedef(binding);
+            self.add_to_var_ns(binding);
         }
         self.advance();
     }
@@ -555,7 +558,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // declspec = struct-decl | union-decl | "void" | "_Bool" | "char" | ("short" | "int" | "long")+
+    // declspec = struct-decl | union-decl | enum-specifier | "void" | "_Bool" | "char" | ("short" | "int" | "long")+
     //
     // The order of typenames in a type-specifier doesn't matter. For
     // example, `int long static` means the same as `static long int`.
@@ -571,6 +574,9 @@ impl<'a> Parser<'a> {
     fn declspec(&mut self) -> Rc<Ty> {
         if self.peek_is("struct") || self.peek_is("union") {
             return self.struct_union_decl();
+        }
+        if self.peek_is("enum") {
+            return self.enum_specifier();
         }
         if self.peek_is("void") {
             self.advance();
@@ -696,6 +702,73 @@ impl<'a> Parser<'a> {
         self.abstract_declarator(base_ty)
     }
 
+    // enum-specifier = ident? "{" enum-list? "}"
+    //                | ident ("{" enum-list? "}")?
+    //
+    // enum-list      = ident ("=" num)? ("," ident ("=" num)?)*
+    fn enum_specifier(&mut self) -> Rc<Ty> {
+        let mut tag = None;
+        let loc = self.skip("enum").loc;
+
+        if let TokenKind::Ident = self.peek().kind {
+            tag = Some(self.ctx.tok_source(self.advance()));
+        }
+
+        if tag.is_some() && !self.peek_is("{") {
+            match self.find_tag(tag.unwrap()) {
+                Some(binding) => {
+                    let binding = binding.borrow();
+                    if let TyKind::Enum = binding.ty.kind {
+                        return binding.ty.clone();
+                    }
+                    self.ctx.error_at(&loc, "tag is not bound to an enum");
+                },
+                None => {
+                    self.ctx.error_at(&loc, "unknown enum type")
+                }
+            };
+        }
+
+
+        let ty = Ty::enm();
+
+        self.skip("{");
+        let mut count = 0;
+        let mut value = 0;
+        while !self.peek_is("}") {
+            if count > 0 {
+                self.skip(",");
+            }
+            count += 1;
+
+            let name = self.get_identifer().to_owned();
+            if self.peek_is("=") {
+                self.advance();
+                value = self.get_number().try_into().unwrap();
+            }
+
+            self.add_to_var_ns(Rc::new(RefCell::new(Binding {
+                kind: BindingKind::EnumConst(value),
+                name,
+                ty: ty.clone(),
+                loc,
+            })));
+
+            value += 1;
+        }
+        self.advance(); // }
+
+        if tag.is_some() {
+            self.add_to_tag_ns(Rc::new(RefCell::new(Binding {
+                kind: BindingKind::Decl,
+                name: tag.unwrap().to_owned(),
+                ty: ty.clone(),
+                loc,
+            })))
+        }
+        ty
+    }
+
     // type-suffix = "(" func-params
     //             | "[" num "]" type-suffix
     //             | ε
@@ -798,7 +871,7 @@ impl<'a> Parser<'a> {
 
         let ty = if is_struct { Ty::strct(members) } else { Ty::union(members) };
         if tag.is_some() {
-            self.add_tag(Rc::new(RefCell::new(Binding {
+            self.add_to_tag_ns(Rc::new(RefCell::new(Binding {
                 kind: BindingKind::Decl,
                 name: tag.unwrap().to_owned(),
                 ty: ty.clone(),
@@ -1197,14 +1270,13 @@ impl<'a> Parser<'a> {
                 let name = self.ctx.tok_source(tok).to_owned();
                 self.advance();
 
-                if let Some(var_data) = self.find_binding(&name) {
-                    let ty = var_data.borrow_mut().ty.clone();
-                    match var_data.borrow().kind {
+                if let Some(binding) = self.find_binding(&name) {
+                    let ty = binding.borrow_mut().ty.clone();
+                    match binding.borrow().kind {
                         BindingKind::Typedef => self.ctx.error_at(&loc, "identifier bound to a typedef"),
-                        _ => {}
+                        BindingKind::EnumConst(value) => return ExprNode { kind: ExprKind::Num(value.into()), loc, ty: Ty::int() },
+                        _ => return ExprNode { kind: ExprKind::Var(Rc::downgrade(binding)), loc, ty }
                     }
-                    let expr = ExprNode { kind: ExprKind::Var(Rc::downgrade(var_data)), loc, ty };
-                    return expr;
                 }
                 else {
                     self.ctx.error_at(&loc, "undefined variable");
@@ -1326,9 +1398,13 @@ impl<'a> Parser<'a> {
         self.scopes.pop();
     }
 
+    fn add_to_var_ns(&mut self, binding: SP<Binding>) {
+        self.scopes.last_mut().unwrap().add(binding);
+    }
+
     fn add_local(&mut self, binding: SP<Binding>) {
         self.cur_fn_local_bindings.push(binding.clone());
-        self.scopes.last_mut().unwrap().add(binding);
+        self.add_to_var_ns(binding);
     }
 
     fn add_global(&mut self, binding: SP<Binding>) {
@@ -1336,15 +1412,11 @@ impl<'a> Parser<'a> {
         if self.scopes.len() > 1 {
             panic!("should not be adding to globals when nested scopes are present");
         }
-        self.scopes.last_mut().unwrap().add(binding);
+        self.add_to_var_ns(binding);
     }
 
     fn add_hidden_global(&mut self, binding: SP<Binding>) {
         self.global_bindings.push(binding);
-    }
-
-    fn add_typedef(&mut self, binding: SP<Binding>) {
-        self.scopes.last_mut().unwrap().add(binding);
     }
 
     fn find_typedef(&self, name: &[u8]) -> Option<&SP<Binding>> {
@@ -1360,7 +1432,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn add_tag(&mut self, binding: SP<Binding>) {
+    fn add_to_tag_ns(&mut self, binding: SP<Binding>) {
         self.scopes.last_mut().unwrap().add_tag(binding);
     }
 
@@ -1426,6 +1498,14 @@ impl<'a> Parser<'a> {
             return val
         }
         self.ctx.error_tok(self.peek(), "expected a number");
+    }
+
+    fn get_identifer(&mut self) -> &[u8] {
+        if let TokenKind::Ident = self.peek().kind {
+            return self.ctx.tok_source(self.advance());
+        }
+
+        self.ctx.error_tok(self.peek(), "expected an identifier");
     }
 
     fn peek_is(&self, s: &str) -> bool {
